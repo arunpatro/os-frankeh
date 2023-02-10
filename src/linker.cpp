@@ -75,14 +75,15 @@ char readIEAR() {
 // 2. determine base addr of each module
 // 3. absolute addr of each symbol
 void pass1() {
-    // int baseAddr = 0;
+    int baseAddr = 0;
     int totalInstructionCount = 0;
     while (!inputFile.eof() && inputFile.peek() != EOF) {
+        baseAddr = totalInstructionCount;
         int defcount = readInt();
         for (int i = 0; i < defcount; i++) {
             std::string symbol = readSymbol();
-            int addr = readInt();
-            symbolTable[symbol] = totalInstructionCount + addr;
+            int relAddr = readInt();
+            symbolTable[symbol] = baseAddr + relAddr;
         }
 
         int usecount = readInt();
@@ -108,12 +109,56 @@ void pass1() {
     }
 }
 
-void printAllTokens() {
-    while (!inputFile.eof()) {
-        Token token = getToken();
-        if (token.val.length() == 0) {
-            break;
+void pass2() {
+    std::cout << std::endl << "Memory Map" << std::endl;
+    int baseAddr = 0;
+    int totalInstructionCount = 0;
+    while (!inputFile.eof() && inputFile.peek() != EOF) {
+        baseAddr = totalInstructionCount;
+        int defcount = readInt();
+        for (int i = 0; i < defcount; i++) {
+            std::string symbol = readSymbol();
+            int relAddr = readInt();
         }
+
+        int usecount = readInt();
+        std::vector<std::string> useList;
+        for (int i = 0; i < usecount; i++) {
+            std::string symbol = readSymbol();
+            useList.push_back(symbol);
+        }
+
+        int codecount = readInt();
+        for (int i = 0; i < codecount; i++) {
+            char addressmode = readIEAR();
+            int instruction = readInt();
+            int opcode = instruction / 1000;
+            int operand = instruction % 1000;
+
+            int addr = baseAddr + i;
+
+            if (addressmode == 'I') {
+                std::cout << std::setw(3) << addr << ": " << std::setw(4) << instruction << std::endl;
+            } else if (addressmode == 'E') {
+                std::string symbol = useList[operand];
+                int symbolAddr = symbolTable[symbol];
+                int modifiedInstruction = (opcode * 1000) + symbolAddr;
+                std::cout << std::setw(3) << addr << ": " << std::setw(4) << modifiedInstruction << std::endl;
+            } else if (addressmode == 'A') {
+                std::cout << std::setw(3) << addr << ": " << std::setw(4) << instruction << std::endl;
+            } else if (addressmode == 'R') {
+                int modifiedInstruction = (opcode * 1000) + (addr + operand);
+                std::cout << std::setw(3) << addr << ": " << std::setw(4) << modifiedInstruction << std::endl;
+            }
+        }
+
+        totalInstructionCount += codecount;
+    }
+}
+
+void printAllTokens() {
+    while (!inputFile.eof() && inputFile.peek() != EOF) {
+        Token token = getToken();
         std::cout << "Line: " << std::setw(3) << token.lineNum << " Offset: " << std::setw(3) << token.lineOff << " Token: " << token.val << std::endl;
     }
 
@@ -122,10 +167,15 @@ void printAllTokens() {
 
 int main(int argc, char* argv[]) {
     // inputFile.open(argv[1]);
-    inputFile.open("../lab1_assign/input-1");
-    // inputFile.open("test.txt");
-
+    // inputFile.open("../lab1_assign/input-1");
     // printAllTokens();
-    pass1();
+    // inputFile.close();
 
+    inputFile.open("../lab1_assign/input-1");
+    pass1();
+    inputFile.close();
+
+    inputFile.open("../lab1_assign/input-1");
+    pass2();
+    inputFile.close();
 }
