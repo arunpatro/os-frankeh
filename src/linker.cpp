@@ -1,8 +1,8 @@
 #include <fstream>
 #include <iostream>
 #include <map>
-#include <sstream>
 #include <vector>
+#include <iomanip>
 
 struct Token {
     std::string val;
@@ -110,7 +110,8 @@ void pass1() {
 }
 
 void pass2() {
-    std::cout << std::endl << "Memory Map" << std::endl;
+    std::cout << std::endl
+              << "Memory Map" << std::endl;
     int baseAddr = 0;
     int totalInstructionCount = 0;
     while (!inputFile.eof() && inputFile.peek() != EOF) {
@@ -138,17 +139,17 @@ void pass2() {
             int addr = baseAddr + i;
 
             if (addressmode == 'I') {
-                std::cout << std::setw(3) << addr << ": " << std::setw(4) << instruction << std::endl;
+                std::cout << std::setfill('0') << std::setw(3) << addr << ": " << std::setw(4) << instruction << std::endl;
             } else if (addressmode == 'E') {
                 std::string symbol = useList[operand];
                 int symbolAddr = symbolTable[symbol];
                 int modifiedInstruction = (opcode * 1000) + symbolAddr;
-                std::cout << std::setw(3) << addr << ": " << std::setw(4) << modifiedInstruction << std::endl;
+                std::cout << std::setfill('0') << std::setw(3) << addr << ": " << std::setw(4) << modifiedInstruction << std::endl;
             } else if (addressmode == 'A') {
-                std::cout << std::setw(3) << addr << ": " << std::setw(4) << instruction << std::endl;
+                std::cout << std::setfill('0') << std::setw(3) << addr << ": " << std::setw(4) << instruction << std::endl;
             } else if (addressmode == 'R') {
-                int modifiedInstruction = (opcode * 1000) + (addr + operand);
-                std::cout << std::setw(3) << addr << ": " << std::setw(4) << modifiedInstruction << std::endl;
+                int modifiedInstruction = (opcode * 1000) + (baseAddr + operand);
+                std::cout << std::setfill('0') << std::setw(3) << addr << ": " << std::setw(4) << modifiedInstruction << std::endl;
             }
         }
 
@@ -171,11 +172,12 @@ int main(int argc, char* argv[]) {
     // printAllTokens();
     // inputFile.close();
 
-    inputFile.open("../lab1_assign/input-1");
+    inputFile.open(argv[1]);
     pass1();
     inputFile.close();
 
-    inputFile.open("../lab1_assign/input-1");
+    // inputFile.open("../lab1_assign/input-1");
+    inputFile.open(argv[1]);
     pass2();
     inputFile.close();
 }
