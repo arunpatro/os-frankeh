@@ -354,6 +354,8 @@ int main(int argc, char* argv[]) {
     pass1();
     inputFile.close();
 
+    lineNum = 1;
+    lineOff = 1;
     // inputFile.open("../lab1_assign/input-20");
     inputFile.open(argv[1]);
     pass2();
