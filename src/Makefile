@@ -11,3 +11,7 @@ run:
 
 grade:
 	../lab1_assign/gradeit.sh ../lab1_assign/ ../outputs
+
+test:
+	cd ../tests; ./runit.sh predOutputs ../src/linker
+	cd ../tests/; ./gradeit.sh ./testOutputs ../tests/predOutputs
