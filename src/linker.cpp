@@ -401,27 +401,28 @@ void printAllTokens() {
 
 int main(int argc, char* argv[]) {
     // inputFile.open("../lab1_assign/input-13");
-    inputFile.open(argv[1]);
-    printAllTokens();
-    inputFile.close();
+    // inputFile.open(argv[1]);
+    // printAllTokens();
+    // inputFile.close();
 
-    // inputFile.open("../lab1_assign/input-20");
     // try {
     //     inputFile.open(argv[1]);
     // } catch (std::exception& e) {
     //     std::cout << "Not a valid inputfile <" << argv[1] << "" << std::endl;
     //     return 1;
-    // }
-    // inputFile.open(argv[1]);
-    // pass1();
-    // inputFile.close();
+    // } 
 
-    // lineNum = 1;
-    // lineOff = 1;
-    // // inputFile.open("../lab1_assign/input-20");
     // inputFile.open(argv[1]);
-    // pass2();
-    // inputFile.close();
+    inputFile.open("../tests/testInputs/input-1");
+    pass1();
+    inputFile.close();
+
+    lineNum = 1;
+    lineOff = 1;
+    // inputFile.open("../lab1_assign/input-20");
+    inputFile.open(argv[1]);
+    pass2();
+    inputFile.close();
 
     return 0;
 }
