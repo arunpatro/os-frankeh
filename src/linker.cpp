@@ -46,6 +46,7 @@ std::map<std::string, Symbol> symbolTable;
 std::ifstream inputFile;
 int lineNum = 1;
 int lineOff = 1;
+int lastLineOff = 1;
 
 void __parseerror(int errcode, int lineNum, int lineOff) {
     static std::string errstr[] = {
@@ -66,7 +67,17 @@ Token getToken() {
     char c;
 
     while (inputFile.get(c)) {
-        if (c == ' ' || c == '\t') {
+        if (inputFile.eof()) {
+            // while reading file, eof can occur
+            if (lineOff != 1) {
+                // not the new line, same line;
+                if (token.val.length() > 0) {
+                    token.lineOff = lineOff - token.val.length();
+                    token.lineNum = lineNum;
+                    break;
+                }
+            }
+        } else if (c == ' ' || c == '\t') {
             if (token.val.length() > 0) {
                 token.lineOff = lineOff - token.val.length();
                 token.lineNum = lineNum;
@@ -74,6 +85,7 @@ Token getToken() {
                 break;
             }
             lineOff++;
+            lastLineOff = lineOff;
         } else if (c == '\n') {
             if (token.val.length() > 0) {
                 token.lineOff = lineOff - token.val.length();
@@ -82,17 +94,16 @@ Token getToken() {
                 lineOff = 1;
                 break;
             }
+            if (lineOff == 1) {
+                lastLineOff = 1;
+            }
             lineOff = 1;
             lineNum++;
         } else {
             token.val += c;
             lineOff++;
+            lastLineOff = lineOff;
         }
-    }
-
-    if (inputFile.eof() && token.val.length() > 0) {
-        token.lineOff = lineOff - token.val.length();
-        token.lineNum = lineNum;
     }
 
     return token;
@@ -118,13 +129,38 @@ std::string readSymbol() {
     if (symbol.length() > MAX_SYMBOL_LENGTH) {
         __parseerror(3, token.lineNum, token.lineOff);
     } else if (symbol.length() == 0) {
+        // empty string implies EOF, so no symbol
+        // if lineOff == 1, then it is a new line, so lineOff is actually lastLineOff and lineNum is lineNum - 1
+        if (lineOff == 1) {
+            __parseerror(1, lineNum - 1, lastLineOff);
+        } else {
+            __parseerror(1, lineNum, lastLineOff);
+        }
+    } else if (!isalpha(symbol[0])) {
         __parseerror(1, token.lineNum, token.lineOff);
+    } else {
+        for (int i = 1; i < symbol.length(); i++) {
+            if (!isalnum(symbol[i])) {
+                __parseerror(1, token.lineNum, token.lineOff);
+            }
+        }
     }
     return symbol;
 }
 
 char readIEAR() {
     Token token = getToken();
+
+    // check if token is empty
+    if (token.val.length() == 0) {
+        // empty string implies EOF, so no symbol
+        // if lineOff == 1, then it is a new line, so lineOff is actually lastLineOff and lineNum is lineNum - 1
+        if (lineOff == 1) {
+            __parseerror(2, lineNum - 1, lastLineOff);
+        } else {
+            __parseerror(2, lineNum, lastLineOff);
+        }
+    }
     char addressmode = token.val[0];
 
     // check if addressmode is valid
@@ -141,18 +177,27 @@ void pass1() {
     Token token;
     int baseAddr = 0;
     int totalInstructionCount = 0;
-    int moduleNum = 1;
+    int moduleNum = 0;
 
     while (!inputFile.eof() && inputFile.peek() != EOF) {
-        baseAddr = totalInstructionCount;
 
         token = getToken();
+        if (token.val.length() == 0) {
+            // empty string implies EOF, so no symbol
+            break;
+        }
+
         int defcount = std::stoi(token.val);
         // print error if defcount > 16
         if (defcount > MAX_SYMBOLS_PER_MODULE) {
             __parseerror(4, token.lineNum, token.lineOff);
+        } else if (defcount < 0) {
+            __parseerror(0, token.lineNum, token.lineOff);
         }
 
+        // increment module number now only after successfull defcount
+        moduleNum++;
+        baseAddr = totalInstructionCount;
         for (int i = 0; i < defcount; i++) {
             std::string symbolName = readSymbol();
 
@@ -205,7 +250,6 @@ void pass1() {
         }
 
         totalInstructionCount += codecount;
-        moduleNum++;
     }
 
     // print the symbol table
@@ -228,10 +272,18 @@ void pass2() {
     int totalInstructionCount = 0;
     std::string errorMsg = "";
     int modifiedInstruction;
-    int moduleNum = 1;
+    int moduleNum = 0;
     while (!inputFile.eof() && inputFile.peek() != EOF) {
         baseAddr = totalInstructionCount;
-        int defcount = readInt();
+        Token token = getToken();
+        if (token.val.length() == 0) {
+            // empty string implies EOF, so no symbol
+            break;
+        }
+        int defcount = std::stoi(token.val);
+        // increment module number now only after successfull defcount
+        moduleNum++;
+        baseAddr = totalInstructionCount;
         for (int i = 0; i < defcount; i++) {
             std::string symbol = readSymbol();
             int relAddr = readInt();
@@ -323,7 +375,7 @@ void pass2() {
         }
 
         totalInstructionCount += codecount;
-        moduleNum++;
+        
     }
 
     // print unused symbol warnings
@@ -349,7 +401,7 @@ int main(int argc, char* argv[]) {
     // printAllTokens();
     // inputFile.close();
 
-    // inputFile.open("../lab1_assign/input-16");
+    // inputFile.open("../lab1_assign/input-20");
     inputFile.open(argv[1]);
     pass1();
     inputFile.close();
