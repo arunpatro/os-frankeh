@@ -2,3 +2,5 @@ lab1_assign
 *.dSYM
 .DS_Store
 .vscode
+outputs/
+tests/

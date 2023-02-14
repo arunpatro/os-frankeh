@@ -180,7 +180,6 @@ void pass1() {
     int moduleNum = 0;
 
     while (!inputFile.eof() && inputFile.peek() != EOF) {
-
         token = getToken();
         if (token.val.length() == 0) {
             // empty string implies EOF, so no symbol
@@ -375,7 +374,6 @@ void pass2() {
         }
 
         totalInstructionCount += codecount;
-        
     }
 
     // print unused symbol warnings
@@ -389,29 +387,41 @@ void pass2() {
 void printAllTokens() {
     while (!inputFile.eof() && inputFile.peek() != EOF) {
         Token token = getToken();
-        std::cout << "Line: " << std::setw(3) << token.lineNum << " Offset: " << std::setw(3) << token.lineOff << " Token: " << token.val << std::endl;
+        // std::cout << "Line: " << std::setw(3) << token.lineNum << " Offset: " << std::setw(3) << token.lineOff << " Token: " << token.val << std::endl;
+        std::printf("Token: %d:%d : %s\n", lineNum, lineOff, token.val.c_str());
     }
 
-    std::cout << "EOF at line " << lineNum << " and line offset " << lineOff << std::endl;
+    // std::cout << "EOF at line " << lineNum << " and line offset " << lineOff << std::endl;
+    if (lineOff == 1) {
+            std::printf("Final Spot in File : line=%d offset=:%d\n", lineNum - 1, lastLineOff);
+        } else {
+            std::printf("Final Spot in File : line=%d offset=:%d\n", lineNum, lastLineOff);
+        }
 }
 
 int main(int argc, char* argv[]) {
     // inputFile.open("../lab1_assign/input-13");
+    inputFile.open(argv[1]);
+    printAllTokens();
+    inputFile.close();
+
+    // inputFile.open("../lab1_assign/input-20");
+    // try {
+    //     inputFile.open(argv[1]);
+    // } catch (std::exception& e) {
+    //     std::cout << "Not a valid inputfile <" << argv[1] << "" << std::endl;
+    //     return 1;
+    // }
     // inputFile.open(argv[1]);
-    // printAllTokens();
+    // pass1();
     // inputFile.close();
 
-    // inputFile.open("../lab1_assign/input-20");
-    inputFile.open(argv[1]);
-    pass1();
-    inputFile.close();
-
-    lineNum = 1;
-    lineOff = 1;
-    // inputFile.open("../lab1_assign/input-20");
-    inputFile.open(argv[1]);
-    pass2();
-    inputFile.close();
+    // lineNum = 1;
+    // lineOff = 1;
+    // // inputFile.open("../lab1_assign/input-20");
+    // inputFile.open(argv[1]);
+    // pass2();
+    // inputFile.close();
 
     return 0;
 }
