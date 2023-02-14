@@ -41,7 +41,9 @@ struct Token {
     int lineOff;
 };
 
+
 std::map<std::string, Symbol> symbolTable;
+std::vector<std::string> symbolTableOrder;
 
 std::ifstream inputFile;
 int lineNum = 1;
@@ -186,6 +188,7 @@ void pass1() {
             break;
         }
 
+        // DEFCOUNT CHECKS
         int defcount = std::stoi(token.val);
         // print error if defcount > 16
         if (defcount > MAX_SYMBOLS_PER_MODULE) {
@@ -197,6 +200,8 @@ void pass1() {
         // increment module number now only after successfull defcount
         moduleNum++;
         baseAddr = totalInstructionCount;
+
+        // START READING SYMBOLS for DEFCOUNT
         for (int i = 0; i < defcount; i++) {
             std::string symbolName = readSymbol();
 
@@ -211,6 +216,7 @@ void pass1() {
                 symbol.absAddr = baseAddr + relAddr;
                 symbol.moduleNum = moduleNum;
                 symbolTable[symbolName] = symbol;
+                symbolTableOrder.push_back(symbolName);
             }
         }
 
@@ -254,14 +260,23 @@ void pass1() {
     // print the symbol table
     std::cout << "Symbol Table" << std::endl;
     std::string errorMsg = "";
-    for (auto it = symbolTable.begin(); it != symbolTable.end(); it++) {
-        if (it->second.redefined) {
+    for (auto it = symbolTableOrder.begin(); it != symbolTableOrder.end(); it++) {
+        if (symbolTable[*it].redefined) {
             errorMsg = " Error: This variable is multiple times defined; first value used";
         } else {
             errorMsg = "";
         }
-        std::cout << it->first << "=" << it->second.absAddr << errorMsg << std::endl;
+        std::cout << *it << "=" << symbolTable[*it].absAddr << errorMsg << std::endl;
     }
+
+    // for (auto it = symbolTable.begin(); it != symbolTable.end(); it++) {
+    //     if (it->second.redefined) {
+    //         errorMsg = " Error: This variable is multiple times defined; first value used";
+    //     } else {
+    //         errorMsg = "";
+    //     }
+    //     std::cout << it->first << "=" << it->second.absAddr << errorMsg << std::endl;
+    // }
 }
 
 void pass2() {
