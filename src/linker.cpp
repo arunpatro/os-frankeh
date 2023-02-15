@@ -1,8 +1,10 @@
 #include <cstdio>
+#include <cstring>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <map>
+#include <string>
 #include <vector>
 
 //// CONSTANTS
@@ -64,7 +66,6 @@ char* tokenChars;
 Token getToken() {
     Token tokenStruct;
     bool prevTokenExists;
-
     prevTokenExists = tokenChars != NULL;
 
     // if we already have a token, then we can get the next token with strtok
@@ -93,7 +94,7 @@ Token getToken() {
         tokenStruct.lineNum = lineNum;
         tokenStruct.lineOff = lineOff + 1;
 
-        lineOff += tokenStruct.val.length();
+        // lineOff += tokenStruct.val.length();
     } else {
         // no token, so we are either on a line with end of file, or we are at the end of the file
         tokenStruct.val = "";
@@ -325,16 +326,6 @@ void pass2() {
                 }
                 std::cout << std::setfill('0') << std::setw(3) << addr << ": " << std::setw(4) << modifiedInstruction << errorMsg << std::endl;
             } else if (addressmode == 'E') {
-                std::string symbol = useList[operand].first;
-
-                // mark the symbol as used from the use list
-                useList[operand].second = true;
-
-                if (symbolTable.count(symbol) != 0) {
-                    // mark the symbol as used
-                    symbolTable[symbol].used = true;
-                }
-
                 std::string errorMsg = "";
                 if (opcode >= 10) {
                     errorMsg = " Error: Illegal opcode; treated as 9999";
@@ -342,13 +333,21 @@ void pass2() {
                 } else if (operand >= usecount) {
                     errorMsg = " Error: External address exceeds length of uselist; treated as immediate";
                     modifiedInstruction = instruction;
-                } else if (symbolTable.count(symbol) == 0) {
-                    errorMsg = " Error: " + symbol + " is not defined; zero used";
-                    modifiedInstruction = (opcode * 1000);
                 } else {
-                    int symbolAddr = symbolTable[symbol].absAddr;
-                    modifiedInstruction = (opcode * 1000) + symbolAddr;
-                    errorMsg = "";
+                    std::string symbol = useList[operand].first;
+
+                    // mark the symbol as used from the use list
+                    useList[operand].second = true;
+
+                    if (symbolTable.count(symbol) == 0) {
+                        errorMsg = " Error: " + symbol + " is not defined; zero used";
+                        modifiedInstruction = (opcode * 1000);
+                    } else {
+                        symbolTable[symbol].used = true;
+                        int symbolAddr = symbolTable[symbol].absAddr;
+                        modifiedInstruction = (opcode * 1000) + symbolAddr;
+                        errorMsg = "";
+                    }
                 }
                 std::cout << std::setfill('0') << std::setw(3) << addr << ": " << std::setw(4) << modifiedInstruction << errorMsg << std::endl;
             } else if (addressmode == 'A') {
@@ -411,27 +410,23 @@ void printTokenize() {
 }
 
 int main(int argc, char* argv[]) {
-    // inputFile.open("../lab1_assign/input-12");
-    // // inputFile.open(argv[1]);
+    // inputFile.open(argv[1]);
     // printTokenize();
     // inputFile.close();
 
-    // try {
-    //     inputFile.open(argv[1]);
-    // } catch (std::exception& e) {
-    //     std::cout << "Not a valid inputfile <" << argv[1] << "" << std::endl;
-    //     return 1;
-    // }
+    try {
+        inputFile.open(argv[1]);
+    } catch (std::exception& e) {
+        std::cout << "Not a valid inputfile <" << argv[1] << "" << std::endl;
+        return 1;
+    }
 
-    // inputFile.open("../tests/testInputs/input-12");
-    // inputFile.open("../lab1_assign/input-12");
     inputFile.open(argv[1]);
     pass1();
     inputFile.close();
 
     lineNum = 0;
     lineOff = 0;
-    // // inputFile.open("../lab1_assign/input-20");
     inputFile.open(argv[1]);
     pass2();
     inputFile.close();
