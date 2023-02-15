@@ -10,7 +10,7 @@ const int MACHINE_SIZE = 512;
 const int MAX_SYMBOL_LENGTH = 16;
 const int MAX_SYMBOLS_PER_MODULE = 16;
 const int MAX_USES_PER_MODULE = 16;
-const int MAX_NUM = 2E+30;
+const int MAX_NUM = int(2E+30);
 
 class Symbol {
    public:
@@ -19,19 +19,13 @@ class Symbol {
     int absAddr;
     int moduleNum;
     bool used;
-    // bool defined;
     bool redefined;
-    // bool error;
-    // bool warning;
     Symbol(std::string name = "", int value = 0, int moduleNum = 0) {
         name = name;
         relAddr = value;
         used = false;
         moduleNum = moduleNum;
-        // defined = false;
         redefined = false;
-        // error = false;
-        // warning = false;
     }
 };
 
@@ -41,14 +35,14 @@ struct Token {
     int lineOff;
 };
 
-
 std::map<std::string, Symbol> symbolTable;
 std::vector<std::string> symbolTableOrder;
 
 std::ifstream inputFile;
-int lineNum = 1;
-int lineOff = 1;
-int lastLineOff = 1;
+int lineNum = 0;
+int lineOff = 0;
+// int lastLineOff = 1;
+int finalOffset = 0;
 
 void __parseerror(int errcode, int lineNum, int lineOff) {
     static std::string errstr[] = {
@@ -64,64 +58,75 @@ void __parseerror(int errcode, int lineNum, int lineOff) {
     exit(errcode);
 }
 
-Token getToken() {
-    Token token;
-    char c;
+std::string line;
+char* tokenChars;
 
-    while (inputFile.get(c)) {
-        if (inputFile.eof()) {
-            // while reading file, eof can occur
-            if (lineOff != 1) {
-                // not the new line, same line;
-                if (token.val.length() > 0) {
-                    token.lineOff = lineOff - token.val.length();
-                    token.lineNum = lineNum;
-                    break;
-                }
-            }
-        } else if (c == ' ' || c == '\t') {
-            if (token.val.length() > 0) {
-                token.lineOff = lineOff - token.val.length();
-                token.lineNum = lineNum;
-                lineOff++;
-                break;
-            }
-            lineOff++;
-            lastLineOff = lineOff;
-        } else if (c == '\n') {
-            if (token.val.length() > 0) {
-                token.lineOff = lineOff - token.val.length();
-                token.lineNum = lineNum;
-                lineNum++;
-                lineOff = 1;
-                break;
-            }
-            if (lineOff == 1) {
-                lastLineOff = 1;
-            }
-            lineOff = 1;
+Token getToken() {
+    Token tokenStruct;
+    bool prevTokenExists;
+
+    prevTokenExists = tokenChars != NULL;
+
+    // if we already have a token, then we can get the next token with strtok
+    if (prevTokenExists) {
+        tokenChars = std::strtok(NULL, " \t\n");
+    }
+
+    // if token doesn't exist, get a new token
+    while (!tokenChars) {
+        // if we get a new line, then increment lineNum and get token from that line
+        if (std::getline(inputFile, line)) {
             lineNum++;
+            lineOff = 0;
+            tokenChars = std::strtok(&line[0], " \t\n");
+            // if token exists, then obv while loop breaks
         } else {
-            token.val += c;
-            lineOff++;
-            lastLineOff = lineOff;
+            // we don't have a token and we don't have a new line, so we are at the end of the file
+            // return empty token
+            break;
         }
     }
 
-    return token;
+    if (tokenChars) {
+        lineOff = line.find(tokenChars, lineOff);
+        tokenStruct.val = tokenChars;
+        tokenStruct.lineNum = lineNum;
+        tokenStruct.lineOff = lineOff + 1;
+
+        lineOff += tokenStruct.val.length();
+    } else {
+        // no token, so we are either on a line with end of file, or we are at the end of the file
+        tokenStruct.val = "";
+        if (inputFile.eof()) {
+            // end of file in this line, so final offset is end of line
+            if (line.length() == 0) {
+                finalOffset = lineOff + 1;
+            } else {
+                finalOffset = line.length();
+            }
+        } else {
+            // next line we read will have eof
+            finalOffset = line.length() + 1;
+        }
+        tokenStruct.lineOff = finalOffset;
+        tokenStruct.lineNum = lineNum;
+    }
+
+    return tokenStruct;
 }
 
 int readInt() {
+    int number;
     Token token = getToken();
     try {
-        int number = std::stoi(token.val);
+        number = std::stoi(token.val);
         if (number > MAX_NUM) {
             __parseerror(0, token.lineNum, token.lineOff);
         }
-        return number;
     } catch (const std::exception& e) {
         __parseerror(0, token.lineNum, token.lineOff);
     }
+    return number;
 }
 
 std::string readSymbol() {
@@ -133,11 +138,7 @@ std::string readSymbol() {
     } else if (symbol.length() == 0) {
         // empty string implies EOF, so no symbol
         // if lineOff == 1, then it is a new line, so lineOff is actually lastLineOff and lineNum is lineNum - 1
-        if (lineOff == 1) {
-            __parseerror(1, lineNum - 1, lastLineOff);
-        } else {
-            __parseerror(1, lineNum, lastLineOff);
-        }
+        __parseerror(1, lineNum, finalOffset);
     } else if (!isalpha(symbol[0])) {
         __parseerror(1, token.lineNum, token.lineOff);
     } else {
@@ -157,11 +158,7 @@ char readIEAR() {
     if (token.val.length() == 0) {
         // empty string implies EOF, so no symbol
         // if lineOff == 1, then it is a new line, so lineOff is actually lastLineOff and lineNum is lineNum - 1
-        if (lineOff == 1) {
-            __parseerror(2, lineNum - 1, lastLineOff);
-        } else {
-            __parseerror(2, lineNum, lastLineOff);
-        }
+        __parseerror(2, token.lineNum, token.lineOff);
     }
     char addressmode = token.val[0];
 
@@ -399,25 +396,24 @@ void pass2() {
     }
 }
 
-void printAllTokens() {
-    while (!inputFile.eof() && inputFile.peek() != EOF) {
+void printTokenize() {
+    while (true) {
         Token token = getToken();
+        if (token.val == "") {
+            break;
+        }
         // std::cout << "Line: " << std::setw(3) << token.lineNum << " Offset: " << std::setw(3) << token.lineOff << " Token: " << token.val << std::endl;
-        std::printf("Token: %d:%d : %s\n", lineNum, lineOff, token.val.c_str());
+        std::printf("Token: %d:%d : %s\n", token.lineNum, token.lineOff, token.val.c_str());
     }
 
     // std::cout << "EOF at line " << lineNum << " and line offset " << lineOff << std::endl;
-    if (lineOff == 1) {
-            std::printf("Final Spot in File : line=%d offset=:%d\n", lineNum - 1, lastLineOff);
-        } else {
-            std::printf("Final Spot in File : line=%d offset=:%d\n", lineNum, lastLineOff);
-        }
+    std::printf("Final Spot in File : line=%d offset=:%d\n", lineNum, finalOffset);
 }
 
 int main(int argc, char* argv[]) {
-    // inputFile.open("../lab1_assign/input-13");
-    // inputFile.open(argv[1]);
-    // printAllTokens();
+    // inputFile.open("../lab1_assign/input-12");
+    // // inputFile.open(argv[1]);
+    // printTokenize();
     // inputFile.close();
 
     // try {
@@ -425,16 +421,17 @@ int main(int argc, char* argv[]) {
     // } catch (std::exception& e) {
     //     std::cout << "Not a valid inputfile <" << argv[1] << "" << std::endl;
     //     return 1;
-    // } 
+    // }
 
-    // inputFile.open(argv[1]);
-    inputFile.open("../tests/testInputs/input-1");
+    // inputFile.open("../tests/testInputs/input-12");
+    // inputFile.open("../lab1_assign/input-12");
+    inputFile.open(argv[1]);
     pass1();
     inputFile.close();
 
-    lineNum = 1;
-    lineOff = 1;
-    // inputFile.open("../lab1_assign/input-20");
+    lineNum = 0;
+    lineOff = 0;
+    // // inputFile.open("../lab1_assign/input-20");
     inputFile.open(argv[1]);
     pass2();
     inputFile.close();
