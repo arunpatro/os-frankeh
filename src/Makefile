@@ -1,17 +1,7 @@
-all: clean linker run grade
+all: clean linker
 
 linker: linker.cpp
-	g++ -g linker.cpp -o linker
+	g++ -std=c++11 -g linker.cpp -o linker
 
 clean:
 	rm -f linker *~
-
-run:
-	cd ../lab1_assign/; ./runit.sh ../outputs ../src/linker
-
-grade:
-	../lab1_assign/gradeit.sh ../lab1_assign/ ../outputs
-
-test:
-	cd ../tests; ./runit.sh predOutputs ../src/linker
-	cd ../tests/; ./gradeit.sh ./testOutputs ../tests/predOutputs
