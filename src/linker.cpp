@@ -44,7 +44,7 @@ std::ifstream inputFile;
 int lineNum = 0;
 int lineOff = 0;
 // int lastLineOff = 1;
-int finalOffset = 0;
+int fileFinalPosition = 0;
 
 void __parseerror(int errcode, int lineNum, int lineOff) {
     static std::string errstr[] = {
@@ -79,6 +79,7 @@ Token getToken() {
         if (std::getline(inputFile, line)) {
             lineNum++;
             lineOff = 0;
+            fileFinalPosition = 1;
             tokenChars = std::strtok(&line[0], " \t\n");
             // if token exists, then obv while loop breaks
         } else {
@@ -89,27 +90,27 @@ Token getToken() {
     }
 
     if (tokenChars) {
-        lineOff = line.find(tokenChars, lineOff);
+        // lineOff = line.find(tokenChars, lineOff);
+        lineOff = tokenChars - const_cast<char*>(line.c_str());
+
+        if (inputFile.eof()) {
+            // end of file in this line, so final offset is end of line
+            
+                fileFinalPosition = line.length();
+        } else {
+            // next line we read will have eof
+            fileFinalPosition = line.length() + 1;
+        }
+
         tokenStruct.val = tokenChars;
         tokenStruct.lineNum = lineNum;
         tokenStruct.lineOff = lineOff + 1;
 
-        // lineOff += tokenStruct.val.length();
+        // lineOff += tokenStruct.val.length(); // this gives some errors at end of line
     } else {
         // no token, so we are either on a line with end of file, or we are at the end of the file
         tokenStruct.val = "";
-        if (inputFile.eof()) {
-            // end of file in this line, so final offset is end of line
-            if (line.length() == 0) {
-                finalOffset = lineOff + 1;
-            } else {
-                finalOffset = line.length();
-            }
-        } else {
-            // next line we read will have eof
-            finalOffset = line.length() + 1;
-        }
-        tokenStruct.lineOff = finalOffset;
+        tokenStruct.lineOff = fileFinalPosition;
         tokenStruct.lineNum = lineNum;
     }
 
@@ -139,7 +140,7 @@ std::string readSymbol() {
     } else if (symbol.length() == 0) {
         // empty string implies EOF, so no symbol
         // if lineOff == 1, then it is a new line, so lineOff is actually lastLineOff and lineNum is lineNum - 1
-        __parseerror(1, lineNum, finalOffset);
+        __parseerror(1, lineNum, fileFinalPosition);
     } else if (!isalpha(symbol[0])) {
         __parseerror(1, token.lineNum, token.lineOff);
     } else {
@@ -406,7 +407,7 @@ void printTokenize() {
     }
 
     // std::cout << "EOF at line " << lineNum << " and line offset " << lineOff << std::endl;
-    std::printf("Final Spot in File : line=%d offset=:%d\n", lineNum, finalOffset);
+    std::printf("Final Spot in File : line=%d offset=:%d\n", lineNum, fileFinalPosition);
 }
 
 int main(int argc, char* argv[]) {
@@ -421,7 +422,8 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    inputFile.open(argv[1]);
+    // inputFile.open(argv[1]);
+    // inputFile.open("../lab1_assign/input-1");
     pass1();
     inputFile.close();
 
