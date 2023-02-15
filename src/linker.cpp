@@ -422,8 +422,6 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // inputFile.open(argv[1]);
-    // inputFile.open("../lab1_assign/input-1");
     pass1();
     inputFile.close();
 
