@@ -1,7 +1,7 @@
-all: clean linker
+all: clean scheduler
 
-linker: linker.cpp
-	g++ -std=c++11 -g linker.cpp -o linker
+scheduler: scheduler.cpp
+	g++ -std=c++11 -g scheduler.cpp -o scheduler
 
 clean:
-	rm -f linker *~
+	rm -f scheduler *~
