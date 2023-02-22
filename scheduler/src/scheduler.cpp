@@ -10,35 +10,34 @@
 // other notes
 // - implment queues of process pointer to avoid pass by value
 
+#include <cstring>
+#include <fstream>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <vector>
-#include <fstream>
-#include <sstream>
-#include <cstring>
 
 class Process {
    public:
     std::string name;
     int id;
     int at, tc, cb, io;
+    process_state state;
 };
 
-
-
-enum class process_transition { 
-    CREATED_TO_READY, 
+enum class process_transition {
+    CREATED_TO_READY,
     READY_TO_RUNNING,
     RUNNING_TO_BLOCKED,
     BLOCKED_TO_READY,
     RUNNING_TO_READY,
 };
 
-enum class process_state { 
-    CREATED, 
-    READY, 
-    RUNNING, 
-    BLOCKED, 
+enum class process_state {
+    CREATED,
+    READY,
+    RUNNING,
+    BLOCKED,
 };
 
 class Scheduler {
@@ -52,6 +51,27 @@ class Scheduler {
     void add_process(Process p);
     Process get_next_process();
     bool does_preempt();
+};
+
+// des layer that keeps track of the simulation
+class Event {
+   private:
+    int time;
+    Process* p;
+    process_transition transition;
+
+   public:
+    Event(int time, Process p, process_transition transition);
+};
+
+// des emits events
+class DES {
+   private:
+    std::vector<Process> process_array;
+    int time = 0;
+
+   public:
+    DES(std::vector<Process> process_array);
 };
 
 std::vector<Process> build_process_array(std::string filename) {
@@ -69,7 +89,6 @@ std::vector<Process> build_process_array(std::string filename) {
 
         process_array.push_back(p);
     }
-
 
     return process_array;
 }
