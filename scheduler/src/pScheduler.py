@@ -1,12 +1,10 @@
 from collections import deque
 from enum import Enum
 import heapq
-from collections import deque
+from collections import deque, namedtuple
 import bisect
 import bisect
 
-
-        
 
 maxprio = 4
 current_running_process = None
@@ -14,8 +12,6 @@ current_running_process = None
 # final stats
 last_process_finish_time = float('-inf')
 cpu_time = 0
-io_time = 0
-
 
 
 class process_state(Enum):
@@ -51,12 +47,7 @@ class PriorityQueue:
         
         return self.queue.popleft()
 
-class Event:
-    def __init__(self, time, pid, time_in_state, transition):
-        self.time = time
-        self.pid = pid
-        self.time_in_state = time_in_state
-        self.transition = transition
+Event = namedtuple('Event', ['time', 'pid', 'time_entered_state', 'transition'])
 
 class Process:
     def __init__(self, id, at, tc, cb, io, rand_generator):
@@ -80,10 +71,17 @@ class DES:
     def __init__(self, process_arr):
         self.process_arr = process_arr
         self.event_queue = PriorityQueue()
+        self.time = 0
         
         for process in process_arr:
-            event = (process.at, process.id, 0, process_transition.CREATED_TO_READY)
+            event = Event(process.at, process.id, process.at, process_transition.CREATED_TO_READY)
             self.event_queue.insert(event)
+            
+    def next_event_time(self):
+        if self.event_queue.isEmpty():
+            return None
+        
+        return self.event_queue.queue[0][0]
         
     def next_event(self):
         return self.event_queue.pop()
@@ -94,9 +92,11 @@ class Scheduler:
         self.name = name
         self.runQ = []
     
-    def schedule(self):
-        # get the next process from the runQ
-        pid = self.runQ.pop(0)
+    def get_next_process(self):
+        if self.runQ:
+            return self.runQ.pop(0)
+        
+        return None
         
     
 class RandGenerator:
@@ -131,88 +131,107 @@ def get_process_array(filename:str, rand_generator:RandGenerator) -> deque[Proce
     return process_array
 
 def print_summary(scheduler, process_arr):
-    global last_process_finish_time, cpu_time, io_time
+    global last_process_finish_time, cpu_time
     total_cpu_time = sum(p.tc - p.remaining_time for p in process_arr if p.finish_time is not None)
-    total_elapsed_time = last_process_finish_time - process_arr[0].at
-    cpu_util = total_cpu_time / total_elapsed_time * 100
+    total_io_time = sum(p.io_time for p in process_arr if p.finish_time is not None)
+    total_elapsed_time = last_process_finish_time - min([i.at for i in process_arr])
 
-    io_util = io_time / last_process_finish_time * 100.
-    avg_tat = sum([p.turnaround_time for p in process_arr]) / len(process_arr)
-    avg_cw = sum([p.cw for p in process_arr]) / len(process_arr)
-    throughput = len(process_arr) / last_process_finish_time * 100.
-    
     print(scheduler.name)
     for process in process_arr:
         print(f"{process.id:04d}:\t{process.at}\t{process.tc}\t{process.cb}\t{process.io}\t{process.static_priority} | {process.finish_time}\t{process.turnaround_time}\t{process.io_time}\t{process.cw}")
         
+    cpu_util = cpu_time / total_elapsed_time * 100
+    io_util = total_io_time / total_elapsed_time
+    avg_tat = sum([p.turnaround_time for p in process_arr]) / len(process_arr)
+    avg_cw = sum([p.cw for p in process_arr]) / len(process_arr)
+    throughput = len(process_arr) / last_process_finish_time * 100.
+    
     print(f"SUM: {last_process_finish_time} {cpu_util:.2f} {io_util:.2f} {avg_tat:.2f} {avg_cw:.2f} {throughput:.3f}")
     
     
 def simulation(des, rand_generator, process_arr, scheduler):
-    global last_process_finish_time, cpu_time, io_time
+    global last_process_finish_time, cpu_time, current_running_process
     while (event := des.next_event()):
-        clock, pid, time_in_state, transition = event
+        clock, pid, time_entered_state, transition = event
+        time_in_state = clock - time_entered_state
         remaining_time = process_arr[pid].remaining_time
+        
+        # # set the des.time to the event time, or the current time if event was supposed to happen earlier
+        # des.time = max(des.time, clock)
+        # time_in_state = des.time - time_entered_state
+        
         
         match transition:
             case process_transition.CREATED_TO_READY:
+                # must come from BLOCKED or CREATED
+                # add to run queue, no event created
                 print(f"{clock} {pid} {time_in_state}: {transition.name.replace('_TO_', ' -> ')}")
-                next_event_for_this_pid = (clock, pid, 0, process_transition.READY_TO_RUNNG)
-                process_arr[pid].cw += time_in_state
-                # heapq.heappush(des.event_queue, next_event_for_this_pid)
-                des.event_queue.insert(next_event_for_this_pid)
+                scheduler.runQ.append((pid, clock))
+                call_scheduler = True
                 
             case process_transition.READY_TO_RUNNG:
+                # get params and add the process to the runQ
                 cpuburst = rand_generator.next(process_arr[pid].cb)
                 cpuburst = min(cpuburst, process_arr[pid].remaining_time)
                 print(f"{clock} {pid} {time_in_state}: {transition.name.replace('_TO_', ' -> ')} cb={cpuburst} rem={remaining_time} prio={process_arr[pid].dynamic_priority}")
                 
-                ## if the cpuburst is equal to the remaining time, then the process is done
-                if (cpuburst == process_arr[pid].remaining_time):
-                    next_event_for_this_pid = (clock + cpuburst, pid, cpuburst, process_transition.DONE)
-                else:
-                    next_event_for_this_pid = (clock + cpuburst, pid, cpuburst, process_transition.RUNNG_TO_BLOCK)
-                process_arr[pid].remaining_time -= cpuburst
+                if (cpuburst < process_arr[pid].remaining_time):
+                    # accumulate the cpu time
+                    cpu_time += cpuburst
+                    # update the remaining time
+                    process_arr[pid].remaining_time -= cpuburst
+                    
+                    # create event for preemption or blocking
+                    next_event_for_this_pid = Event(clock + cpuburst, pid, clock, process_transition.RUNNG_TO_BLOCK)
                 
-                des.event_queue.insert(next_event_for_this_pid)
+                    des.event_queue.insert(next_event_for_this_pid)
+                else:
+                    next_event_for_this_pid = Event(clock + cpuburst, pid, clock, process_transition.DONE)
+                    des.event_queue.insert(next_event_for_this_pid)
+                    
 
             case process_transition.RUNNG_TO_BLOCK:
-                # accumulate the cpu time
-                cpu_time += time_in_state
-                ## choose a random number between 1 and io or if io is greater than time left, choose time left
+                # finished running now blocking
+
+                current_running_process = None
+                # choose a random number between 1 and io or if io is greater than time left, choose time left
                 ioburst = rand_generator.next(process_arr[pid].io)
                 
-                print(f"{clock} {pid} {time_in_state}: {transition.name.replace('_TO_', ' -> ')} ib={ioburst} rem={remaining_time}")
-                next_event_for_this_pid = (clock + ioburst, pid, ioburst, process_transition.BLOCK_TO_READY)
-                # heapq.heappush(des.event_queue, next_event_for_this_pid)
+                print(f"{clock} {pid} {time_in_state}: {transition.name.replace('_TO_', ' -> ')}  ib={ioburst} rem={remaining_time}")
+                next_event_for_this_pid = Event(clock + ioburst, pid, clock, process_transition.BLOCK_TO_READY)
                 des.event_queue.insert(next_event_for_this_pid)
+                call_scheduler = True
                 
             case process_transition.BLOCK_TO_READY:
-                print(f"{clock} {pid} {time_in_state}: {transition.name.replace('_TO_', ' -> ')}")
-                
-                # accumulate the io time
                 process_arr[pid].io_time += time_in_state
-                io_time += time_in_state
-                
-                next_event_for_this_pid = (clock, pid, 0, process_transition.READY_TO_RUNNG)
-                # heapq.heappush(des.event_queue, next_event_for_this_pid)
-                des.event_queue.insert(next_event_for_this_pid)
-            case process_transition.RUNNG_TO_READY:
-                pass
+                print(f"{clock} {pid} {time_in_state}: {transition.name.replace('_TO_', ' -> ')}")
+                scheduler.runQ.append((pid, clock))
+                call_scheduler = True
+            # case process_transition.RUNNG_TO_READY:
+            #     pass
             case process_transition.DONE:
-                print(f"{clock} {pid} {time_in_state}: {transition.name.replace('_TO_', ' -> ')}")
+                current_running_process = None
+                print(f"{clock} {pid} {time_in_state}: {'Done'}")
                 process_arr[pid].finish_time = clock
                 process_arr[pid].turnaround_time = clock - process_arr[pid].at
                 last_process_finish_time = max(last_process_finish_time, clock)
-                print(f"DONE {last_process_finish_time} {clock}")
-
-                print(f"{clock} {pid} {time_in_state}: {transition.name.replace('_TO_', ' -> ')}")
-                process_arr[pid].finish_time = clock
-                process_arr[pid].turnaround_time = clock - process_arr[pid].at
-                last_process_finish_time = max(last_process_finish_time, clock)
-                print(f"DONE {last_process_finish_time} {clock}")
-
-                
+        
+        if (call_scheduler):
+            if des.next_event_time() == clock:
+                # process the next event because it is now
+                continue
+            else:
+                call_scheduler = False
+                if current_running_process == None:
+                    item = scheduler.get_next_process()
+                    if item == None:
+                        continue
+                    else:
+                        # create event to run it for some time
+                        current_running_process, ready_at_time = item
+                        next_event_for_this_pid = Event(clock, current_running_process, ready_at_time, process_transition.READY_TO_RUNNG)
+                        des.event_queue.insert(next_event_for_this_pid)
+                    
 def main(args):
     rand_generator = RandGenerator(args.rfile)
     process_arr = get_process_array(args.inputfile, rand_generator)
