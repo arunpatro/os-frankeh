@@ -146,12 +146,12 @@ def print_summary(scheduler, process_arr):
 
     cpu_util = cpu_time / total_elapsed_time * 100
     io_util = total_io_time / total_elapsed_time * 100
-    avg_tat = sum([p.turnaround_time for p in process_arr]) / len(process_arr)
-    avg_cw = sum([p.cw for p in process_arr]) / len(process_arr)
-    throughput = len(process_arr) / last_process_finish_time * 100.
+    # avg_tat = sum([p.turnaround_time for p in process_arr]) / len(process_arr)
+    # avg_cw = sum([p.cw for p in process_arr]) / len(process_arr)
+    # throughput = len(process_arr) / last_process_finish_time * 100.
 
-    print(f"SUM: {last_process_finish_time} {cpu_util:.2f} {io_util:.2f} {avg_tat:.2f} {avg_cw:.2f} {throughput:.3f}")
-    print("Done.")
+    # print(f"SUM: {last_process_finish_time} {cpu_util:.2f} {io_util:.2f} {avg_tat:.2f} {avg_cw:.2f} {throughput:.3f}")
+    # print("Done.")
 
 
 def simulation(des, rand_generator, process_arr, scheduler):
@@ -213,6 +213,7 @@ def simulation(des, rand_generator, process_arr, scheduler):
                 process_arr[pid].finish_time = clock
                 process_arr[pid].turnaround_time = clock - process_arr[pid].at
                 last_process_finish_time = max(last_process_finish_time, clock)
+                call_scheduler = True
 
         if (call_scheduler):
             if des.next_event_time() == clock:
@@ -246,7 +247,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description='Process some strings.')
-    parser.add_argument('--inputfile', type=str, default="lab2_assign/input1", help='Process array input file')
+    parser.add_argument('--inputfile', type=str, default="lab2_assign/input3", help='Process array input file')
     parser.add_argument('--rfile', type=str, default="lab2_assign/rfile", help='random number file')
     args = parser.parse_args()
 
