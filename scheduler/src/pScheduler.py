@@ -146,12 +146,11 @@ def print_summary(scheduler, process_arr):
 
     cpu_util = cpu_time / total_elapsed_time * 100
     io_util = total_io_time / total_elapsed_time * 100
-    # avg_tat = sum([p.turnaround_time for p in process_arr]) / len(process_arr)
-    # avg_cw = sum([p.cw for p in process_arr]) / len(process_arr)
-    # throughput = len(process_arr) / last_process_finish_time * 100.
+    avg_tat = sum([p.turnaround_time for p in process_arr]) / len(process_arr)
+    avg_cw = sum([p.cw for p in process_arr]) / len(process_arr)
+    throughput = len(process_arr) / last_process_finish_time * 100.
 
-    # print(f"SUM: {last_process_finish_time} {cpu_util:.2f} {io_util:.2f} {avg_tat:.2f} {avg_cw:.2f} {throughput:.3f}")
-    # print("Done.")
+    print(f"SUM: {last_process_finish_time} {cpu_util:.2f} {io_util:.2f} {avg_tat:.2f} {avg_cw:.2f} {throughput:.3f}")
 
 
 def simulation(des, rand_generator, process_arr, scheduler):
