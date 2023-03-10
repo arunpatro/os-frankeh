@@ -12,6 +12,9 @@ current_running_process = None
 # final stats
 last_process_finish_time = float('-inf')
 cpu_time = 0
+total_io_time = 0
+n_io_blocked = 0
+io_start_time = 0
 
 
 class process_state(Enum):
@@ -139,11 +142,9 @@ def print_summary(scheduler, process_arr):
     for process in process_arr:
         print(f"{process.id:04d}:\t{process.at}\t{process.tc}\t{process.cb}\t{process.io}\t{process.static_priority} | {process.finish_time}\t{process.turnaround_time}\t{process.io_time}\t{process.cw}")
     
-    total_elapsed_time = last_process_finish_time - min([process.at for process in process_arr])
-    # cpu_util = cpu_time / total_elapsed_time * 100
-    cpu_util = sum([p.tc for p in process_arr]) / last_process_finish_time * 100
-    # io_util = total_io_time / total_elapsed_time * 100
-    io_util = 1.0
+    assert cpu_time == sum([p.tc for p in process_arr])
+    cpu_util = cpu_time / last_process_finish_time * 100
+    io_util = total_io_time / last_process_finish_time * 100
     avg_tat = sum([p.turnaround_time for p in process_arr]) / len(process_arr)
     avg_cw = sum([p.cw for p in process_arr]) / len(process_arr)
     throughput = len(process_arr) / last_process_finish_time * 100.
@@ -152,7 +153,7 @@ def print_summary(scheduler, process_arr):
 
 
 def simulation(des, rand_generator, process_arr, scheduler):
-    global last_process_finish_time, cpu_time, current_running_process
+    global last_process_finish_time, cpu_time, current_running_process, n_io_blocked, io_start_time, total_io_time
     while (event := des.next_event()):
         clock, pid, time_entered_state, transition = event
         time_in_state = clock - time_entered_state
@@ -167,6 +168,8 @@ def simulation(des, rand_generator, process_arr, scheduler):
                 call_scheduler = True
 
             case process_transition.READY_TO_RUNNG:
+                # increase cw time
+                process_arr[pid].cw += time_in_state
                 # get params and add the process to the runQ
                 cpuburst = rand_generator.next(process_arr[pid].cb)
                 cpuburst = min(cpuburst, process_arr[pid].remaining_time)
@@ -190,10 +193,16 @@ def simulation(des, rand_generator, process_arr, scheduler):
 
             case process_transition.RUNNG_TO_BLOCK:
                 # finished running now blocking
-
                 current_running_process = None
+
                 # choose a random number between 1 and io or if io is greater than time left, choose time left
                 ioburst = rand_generator.next(process_arr[pid].io)
+                
+                # update the start time of io
+                if n_io_blocked == 0:
+                    io_start_time = clock
+                    
+                n_io_blocked += 1
 
                 print(f"{clock} {pid} {time_in_state}: {transition.name.replace('_TO_', ' -> ')}  ib={ioburst} rem={remaining_time}")
                 next_event_for_this_pid = Event(clock + ioburst, pid, clock, process_transition.BLOCK_TO_READY)
@@ -201,6 +210,11 @@ def simulation(des, rand_generator, process_arr, scheduler):
                 call_scheduler = True
 
             case process_transition.BLOCK_TO_READY:
+                # update n_io_blocked
+                n_io_blocked -= 1
+                if n_io_blocked == 0:
+                    total_io_time += clock - io_start_time
+                
                 process_arr[pid].io_time += time_in_state
                 print(f"{clock} {pid} {time_in_state}: {transition.name.replace('_TO_', ' -> ')}")
                 scheduler.runQ.append((pid, clock))
@@ -245,8 +259,8 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description='Process some strings.')
-    parser.add_argument('--inputfile', type=str, default="scheduler/lab2_assign/input3", help='Process array input file')
-    parser.add_argument('--rfile', type=str, default="scheduler/lab2_assign/rfile", help='random number file')
+    parser.add_argument('--inputfile', type=str, default="lab2_assign/input3", help='Process array input file')
+    parser.add_argument('--rfile', type=str, default="lab2_assign/rfile", help='random number file')
     args = parser.parse_args()
 
     main(args)
