@@ -96,14 +96,50 @@ class DES:
 class Scheduler:
     def __init__(self, name):
         self.name = name
-        self.runQ = []
+        self.runQ = deque()
+        
+    def get_next_process(self):
+        if self.runQ:
+            return self.runQ.popleft()
+
+        return None
+    
+    
+class FCFS(Scheduler):
+    def __init__(self):
+        super().__init__('FCFS')
+        
+    
+    
+class LCFS(Scheduler):
+    def __init__(self):
+        super().__init__('LCFS')
+        
+    def add_process(self, process):
+        self.runQ.append(process)
 
     def get_next_process(self):
         if self.runQ:
-            return self.runQ.pop(0)
+            return self.runQ.pop()
 
         return None
 
+
+class SRTF(Scheduler):
+    def __init__(self):
+        super().__init__('SRTF')
+        
+    def add_process(self, item):
+        _, _, remaining_time = item
+        
+        insert_at = bisect.bisect_right([x[2] for x in self.runQ], remaining_time)
+        self.runQ.insert(insert_at, item)
+
+    def get_next_process(self):
+        if self.runQ:
+            return self.runQ.popleft()
+
+        return None
 
 class RandGenerator:
     def __init__(self, filename):
@@ -164,7 +200,7 @@ def simulation(des, rand_generator, process_arr, scheduler):
                 # must come from BLOCKED or CREATED
                 # add to run queue, no event created
                 print(f"{clock} {pid} {time_in_state}: {transition.name.replace('_TO_', ' -> ')}")
-                scheduler.runQ.append((pid, clock))
+                scheduler.add_process((pid, clock, remaining_time))
                 call_scheduler = True
 
             case process_transition.READY_TO_RUNNG:
@@ -217,7 +253,7 @@ def simulation(des, rand_generator, process_arr, scheduler):
                 
                 process_arr[pid].io_time += time_in_state
                 print(f"{clock} {pid} {time_in_state}: {transition.name.replace('_TO_', ' -> ')}")
-                scheduler.runQ.append((pid, clock))
+                scheduler.add_process((pid, clock, remaining_time))
                 call_scheduler = True
 
             case process_transition.DONE:
@@ -236,11 +272,8 @@ def simulation(des, rand_generator, process_arr, scheduler):
                 call_scheduler = False
                 if current_running_process == None:
                     item = scheduler.get_next_process()
-                    if item == None:
-                        continue
-                    else:
-                        # create event to run it for some time
-                        current_running_process, ready_at_time = item
+                    if item:
+                        current_running_process, ready_at_time, remaining_time = item
                         next_event_for_this_pid = Event(clock, current_running_process, ready_at_time, process_transition.READY_TO_RUNNG)
                         des.event_queue.insert(next_event_for_this_pid)
 
@@ -249,7 +282,10 @@ def main(args):
     process_arr = get_process_array(args.inputfile, rand_generator)
 
     des = DES(process_arr)
-    scheduler = Scheduler("FCFS")
+    
+    # scheduler = FCFS()
+    # scheduler = LCFS()
+    scheduler = SRTF()
 
     simulation(des, rand_generator, process_arr, scheduler)
     print_summary(scheduler, process_arr)
