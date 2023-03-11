@@ -100,7 +100,7 @@ class DES:
 class Scheduler:
     def __init__(self, name):
         self.name = name
-        self.quantum = float('inf')
+        self.quantum = 1e4
         self.runQ = deque()
         
     def get_next_process(self):
@@ -144,9 +144,9 @@ class SRTF(Scheduler):
         super().__init__('SRTF')
         
     def add_process(self, item):
-        _, _, remaining_time = item
+        _, _, _, remaining_time = item
         
-        insert_at = bisect.bisect_right([x[2] for x in self.runQ], remaining_time)
+        insert_at = bisect.bisect_right([x[3] for x in self.runQ], remaining_time)
         self.runQ.insert(insert_at, item)
 
     def get_next_process(self):
@@ -169,7 +169,32 @@ class RR(Scheduler):
 
         return None
         
+class PRIO(Scheduler):
+    def __init__(self, quantum, maxprio):
+        super().__init__('PRIO')
+        self.quantum = quantum
+        self.maxprio = maxprio
+        self.active_queues = [PriorityQueue() for _ in range(maxprio)]
+        self.expired_queues = [PriorityQueue() for _ in range(maxprio)]
+    
+    def add_process(self, process):
+        prio = process[0] # priority
+        # insert_at = bisect.bisect_right([x[0] for x in self.active_queues[prio].queue], prio)
+        self.active_queues[prio].insert(process)
+    
+    def get_next_process(self):
+        if not any(i.queue for i in self.active_queues) and not any(i.queue for i in self.expired_queues):
+            return None
+
+        if not any(i.queue for i in self.active_queues):
+            self.active_queues, self.expired_queues = self.expired_queues, self.active_queues
         
+        # get highest priority process in in active queue
+        for queue in self.active_queues[::-1]:
+            if not queue.isEmpty():
+                return queue.pop()
+        
+    
 class RandGenerator:
     def __init__(self, filename):
         self.random_numbers = get_random_numbers(filename)
@@ -203,10 +228,10 @@ def get_process_array(filename: str, rand_generator: RandGenerator) -> deque[Pro
 
 
 def print_summary(scheduler, process_arr):
-    if scheduler.quantum == float('inf'):
-        print(f"{scheduler.name}")
-    else:
+    if scheduler.quantum < 1e4:
         print(f"{scheduler.name} {scheduler.quantum}")
+    else:
+        print(f"{scheduler.name}")
         
     for process in process_arr:
         print(f"{process.id:04d}:\t{process.at}\t{process.tc}\t{process.cb}\t{process.io}\t{process.static_priority} | {process.finish_time}\t{process.turnaround_time}\t{process.io_time}\t{process.cw}")
@@ -228,13 +253,14 @@ def simulation(des, rand_generator, process_arr, scheduler):
         clock, pid, time_entered_state, transition = event
         time_in_state = clock - time_entered_state
         remaining_time = process_arr[pid].remaining_time
+        dyna_prio = process_arr[pid].dynamic_priority
 
         match transition:
             case process_transition.CREATED_TO_READY:
                 # must come from BLOCKED or CREATED
                 # add to run queue, no event created
                 print(f"{clock} {pid} {time_in_state}: {transition.name.replace('_TO_', ' -> ')}")
-                scheduler.add_process((pid, clock, remaining_time))
+                scheduler.add_process((dyna_prio, pid, clock, remaining_time))
                 call_scheduler = True
 
             case process_transition.READY_TO_RUNNG:
@@ -282,10 +308,21 @@ def simulation(des, rand_generator, process_arr, scheduler):
             case process_transition.RUNNG_TO_PREEMPT:
                 # stop the current running process
                 current_running_process = None
+                
                 remaining_time = process_arr[pid].remaining_time
                 process_arr[pid].current_cpu_burst -= time_in_state
                 print(f"{clock} {pid} {time_in_state}: {'RUNNG_TO_READY'.replace('_TO_', ' -> ')}  cb={process_arr[pid].current_cpu_burst} rem={remaining_time} prio={process_arr[pid].dynamic_priority}")
-                scheduler.add_process((pid, clock, remaining_time))
+                
+                # adjust the dynamic priority
+                if scheduler.name in ["PRIO"]:
+                    process_arr[pid].dynamic_priority -= 1
+                    if process_arr[pid].dynamic_priority < 0:
+                        process_arr[pid].dynamic_priority = process_arr[pid].static_priority - 1
+                        # same as add process but insert into expired queue
+                        scheduler.expired_queues[process_arr[pid].dynamic_priority].insert((process_arr[pid].dynamic_priority, pid, clock, remaining_time))
+                else:
+                    scheduler.add_process((dyna_prio, pid, clock, remaining_time))
+                        
                 process_arr[pid].prempted = True
                 call_scheduler = True
 
@@ -312,10 +349,13 @@ def simulation(des, rand_generator, process_arr, scheduler):
                 n_io_blocked -= 1
                 if n_io_blocked == 0:
                     total_io_time += clock - io_start_time
+                    
+                # reset dynamic priority
+                process_arr[pid].dynamic_priority = process_arr[pid].static_priority - 1
                 
                 process_arr[pid].io_time += time_in_state
                 print(f"{clock} {pid} {time_in_state}: {transition.name.replace('_TO_', ' -> ')}")
-                scheduler.add_process((pid, clock, remaining_time))
+                scheduler.add_process((process_arr[pid].dynamic_priority, pid, clock, remaining_time))
                 call_scheduler = True
 
             case process_transition.DONE:
@@ -335,7 +375,7 @@ def simulation(des, rand_generator, process_arr, scheduler):
                 if current_running_process == None:
                     item = scheduler.get_next_process()
                     if item:
-                        current_running_process, ready_at_time, remaining_time = item
+                        dyna_prio, current_running_process, ready_at_time, remaining_time = item
                         next_event_for_this_pid = Event(clock, current_running_process, ready_at_time, process_transition.READY_TO_RUNNG)
                         des.event_queue.insert(next_event_for_this_pid)
 
@@ -354,6 +394,8 @@ def main(args):
             scheduler = SRTF()
         case "R":
             scheduler = RR(int(args.s[1:]))
+        case "P":
+            scheduler = PRIO(int(args.s[1:]), maxprio)
 
     simulation(des, rand_generator, process_arr, scheduler)
     print_summary(scheduler, process_arr)
@@ -366,16 +408,17 @@ if __name__ == "__main__":
     import re
     def valid_schedspec(value):
         # Use regular expression to check for valid specification
-        if not re.match(r'^[FLS]|R\d+$', value):
+        if not re.match(r'^[FLS]|[R|P]\d+$', value):
             raise argparse.ArgumentTypeError(f'Invalid scheduler specification: {value}. Must be one of F, L, S, or R<num>.')
         return value
 
 
     parser = argparse.ArgumentParser(description='Scheduler algorithms for OS')
-    parser.add_argument('--inputfile', type=str, default="lab2_assign/input0", help='Process array input file')
+    parser.add_argument('--inputfile', type=str, default="lab2_assign/input1", help='Process array input file')
     parser.add_argument('--rfile', type=str, default="lab2_assign/rfile", help='random number file')
     parser.add_argument('-s', metavar='schedspec', type=valid_schedspec, help='Scheduler specification (F, L, S, or R<num>)')
 
     args = parser.parse_args()
+    # args = parser.parse_args("-sR2 --inputfile lab2_assign/input0".split())
 
     main(args)
