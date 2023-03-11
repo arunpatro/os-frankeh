@@ -320,6 +320,8 @@ def simulation(des, rand_generator, process_arr, scheduler):
                         process_arr[pid].dynamic_priority = process_arr[pid].static_priority - 1
                         # same as add process but insert into expired queue
                         scheduler.expired_queues[process_arr[pid].dynamic_priority].insert((process_arr[pid].dynamic_priority, pid, clock, remaining_time))
+                    else:
+                        scheduler.add_process((process_arr[pid].dynamic_priority, pid, clock, remaining_time))
                 else:
                     scheduler.add_process((dyna_prio, pid, clock, remaining_time))
                         
@@ -419,6 +421,6 @@ if __name__ == "__main__":
     parser.add_argument('-s', metavar='schedspec', type=valid_schedspec, help='Scheduler specification (F, L, S, or R<num>)')
 
     args = parser.parse_args()
-    # args = parser.parse_args("-sR2 --inputfile lab2_assign/input0".split())
+    # args = parser.parse_args("-sP2 --inputfile lab2_assign/input3".split())
 
     main(args)
