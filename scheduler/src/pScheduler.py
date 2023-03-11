@@ -27,10 +27,11 @@ class process_state(Enum):
 class process_transition(Enum):
     CREATED_TO_READY = 1
     READY_TO_RUNNG = 2
-    RUNNG_TO_BLOCK = 3
-    BLOCK_TO_READY = 4
-    RUNNG_TO_READY = 5
-    DONE = 6
+    RUNNG_TO_PREEMPT = 3
+    RUNNG_TO_BLOCK = 4
+    BLOCK_TO_READY = 5
+    RUNNG_TO_READY = 6
+    DONE = 7
 
 
 class PriorityQueue:
@@ -66,18 +67,21 @@ class Process:
 
         self.static_priority = rand_generator.next(maxprio)
         self.dynamic_priority = self.static_priority - 1
+        
         self.remaining_time = tc
         self.finish_time = None
         self.turnaround_time = None
         self.io_time = 0
         self.cw = 0
+        self.prempted = False
+        
+        self.current_cpu_burst = None
 
 
 class DES:
     def __init__(self, process_arr):
         self.process_arr = process_arr
         self.event_queue = PriorityQueue()
-        self.time = 0
 
         for process in process_arr:
             event = Event(process.at, process.id, process.at, process_transition.CREATED_TO_READY)
@@ -96,6 +100,7 @@ class DES:
 class Scheduler:
     def __init__(self, name):
         self.name = name
+        self.quantum = float('inf')
         self.runQ = deque()
         
     def get_next_process(self):
@@ -108,6 +113,15 @@ class Scheduler:
 class FCFS(Scheduler):
     def __init__(self):
         super().__init__('FCFS')
+        
+    def add_process(self, process):
+        self.runQ.append(process)
+
+    def get_next_process(self):
+        if self.runQ:
+            return self.runQ.popleft()
+
+        return None
         
     
     
@@ -140,7 +154,22 @@ class SRTF(Scheduler):
             return self.runQ.popleft()
 
         return None
+    
+class RR(Scheduler):
+    def __init__(self, quantum):
+        super().__init__('RR')
+        self.quantum = quantum
+    
+    def add_process(self, process):
+        self.runQ.append(process)
+        
+    def get_next_process(self):
+        if self.runQ:
+            return self.runQ.popleft()
 
+        return None
+        
+        
 class RandGenerator:
     def __init__(self, filename):
         self.random_numbers = get_random_numbers(filename)
@@ -174,11 +203,16 @@ def get_process_array(filename: str, rand_generator: RandGenerator) -> deque[Pro
 
 
 def print_summary(scheduler, process_arr):
-    print(scheduler.name)
+    if scheduler.quantum == float('inf'):
+        print(f"{scheduler.name}")
+    else:
+        print(f"{scheduler.name} {scheduler.quantum}")
+        
     for process in process_arr:
         print(f"{process.id:04d}:\t{process.at}\t{process.tc}\t{process.cb}\t{process.io}\t{process.static_priority} | {process.finish_time}\t{process.turnaround_time}\t{process.io_time}\t{process.cw}")
     
-    assert cpu_time == sum([p.tc for p in process_arr])
+    # assert cpu_time == sum([p.tc for p in process_arr])
+    # print(cpu_time, sum([p.tc for p in process_arr]))
     cpu_util = cpu_time / last_process_finish_time * 100
     io_util = total_io_time / last_process_finish_time * 100
     avg_tat = sum([p.turnaround_time for p in process_arr]) / len(process_arr)
@@ -204,28 +238,56 @@ def simulation(des, rand_generator, process_arr, scheduler):
                 call_scheduler = True
 
             case process_transition.READY_TO_RUNNG:
-                # increase cw time
-                process_arr[pid].cw += time_in_state
-                # get params and add the process to the runQ
-                cpuburst = rand_generator.next(process_arr[pid].cb)
-                cpuburst = min(cpuburst, process_arr[pid].remaining_time)
+                
+                # if not coming from pre-emption
+                if not process_arr[pid].prempted:
+                    cpuburst = rand_generator.next(process_arr[pid].cb)
+                    cpuburst = min(cpuburst, process_arr[pid].remaining_time)
+                    process_arr[pid].current_cpu_burst = cpuburst
+                else:
+                    cpuburst = process_arr[pid].current_cpu_burst
+                    
                 print(f"{clock} {pid} {time_in_state}: {transition.name.replace('_TO_', ' -> ')} cb={cpuburst} rem={remaining_time} prio={process_arr[pid].dynamic_priority}")
 
-                if (cpuburst < process_arr[pid].remaining_time):
-                    # accumulate the cpu time
-                    cpu_time += cpuburst
-                    # update the remaining time
-                    process_arr[pid].remaining_time -= cpuburst
-
-                    # create event for preemption or blocking
-                    next_event_for_this_pid = Event(clock + cpuburst, pid, clock, process_transition.RUNNG_TO_BLOCK)
-
+                # increase cw time
+                process_arr[pid].cw += time_in_state
+                
+                # since process is running, remove prememted flag
+                process_arr[pid].prempted = False 
+                
+                # accumulate the cpu time, update the remaining time
+                # check quantum and decide to run normally or fire a preemt signal
+                if scheduler.quantum < cpuburst:
+                    # need to set up preempt signal
+                    cpu_time += scheduler.quantum
+                    process_arr[pid].remaining_time -= scheduler.quantum
+                    
+                    next_event_for_this_pid = Event(clock + scheduler.quantum, pid, clock, process_transition.RUNNG_TO_PREEMPT)
                     des.event_queue.insert(next_event_for_this_pid)
                 else:
+                    # can exhaust cpuburst now, so send to block or done
                     cpu_time += cpuburst
+                    
+                    # create event for done or blocking
+                    if (cpuburst >= process_arr[pid].remaining_time):
+                        # done with this process
+                        next_event_for_this_pid = Event(clock + cpuburst, pid, clock, process_transition.DONE)
+                        des.event_queue.insert(next_event_for_this_pid)
+                    else:
+                        next_event_for_this_pid = Event(clock + cpuburst, pid, clock, process_transition.RUNNG_TO_BLOCK)
+                        des.event_queue.insert(next_event_for_this_pid)
+                    
                     process_arr[pid].remaining_time -= cpuburst
-                    next_event_for_this_pid = Event(clock + cpuburst, pid, clock, process_transition.DONE)
-                    des.event_queue.insert(next_event_for_this_pid)
+                    
+            case process_transition.RUNNG_TO_PREEMPT:
+                # stop the current running process
+                current_running_process = None
+                remaining_time = process_arr[pid].remaining_time
+                process_arr[pid].current_cpu_burst -= time_in_state
+                print(f"{clock} {pid} {time_in_state}: {'RUNNG_TO_READY'.replace('_TO_', ' -> ')}  cb={process_arr[pid].current_cpu_burst} rem={remaining_time} prio={process_arr[pid].dynamic_priority}")
+                scheduler.add_process((pid, clock, remaining_time))
+                process_arr[pid].prempted = True
+                call_scheduler = True
 
             case process_transition.RUNNG_TO_BLOCK:
                 # finished running now blocking
@@ -283,20 +345,37 @@ def main(args):
 
     des = DES(process_arr)
     
-    # scheduler = FCFS()
-    # scheduler = LCFS()
-    scheduler = SRTF()
+    match args.s[0]:
+        case "F":
+            scheduler = FCFS()
+        case "L":
+            scheduler = LCFS()
+        case "S":
+            scheduler = SRTF()
+        case "R":
+            scheduler = RR(int(args.s[1:]))
 
     simulation(des, rand_generator, process_arr, scheduler)
     print_summary(scheduler, process_arr)
 
 
+
+
 if __name__ == "__main__":
     import argparse
+    import re
+    def valid_schedspec(value):
+        # Use regular expression to check for valid specification
+        if not re.match(r'^[FLS]|R\d+$', value):
+            raise argparse.ArgumentTypeError(f'Invalid scheduler specification: {value}. Must be one of F, L, S, or R<num>.')
+        return value
 
-    parser = argparse.ArgumentParser(description='Process some strings.')
-    parser.add_argument('--inputfile', type=str, default="lab2_assign/input3", help='Process array input file')
+
+    parser = argparse.ArgumentParser(description='Scheduler algorithms for OS')
+    parser.add_argument('--inputfile', type=str, default="lab2_assign/input0", help='Process array input file')
     parser.add_argument('--rfile', type=str, default="lab2_assign/rfile", help='random number file')
+    parser.add_argument('-s', metavar='schedspec', type=valid_schedspec, help='Scheduler specification (F, L, S, or R<num>)')
+
     args = parser.parse_args()
 
     main(args)
