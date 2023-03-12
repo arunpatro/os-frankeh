@@ -5,3 +5,9 @@ lab2_assign
 .DS_Store
 .vscode
 outputs/
+
+run.sh
+
+Cargo.lock
+# Ignore all files in the target directory/
+target/

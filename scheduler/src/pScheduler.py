@@ -103,6 +103,9 @@ class Scheduler:
         self.quantum = 1e4
         self.runQ = deque()
         
+    def add_process(self, process):
+        self.runQ.append(process)
+        
     def get_next_process(self):
         if self.runQ:
             return self.runQ.popleft()
@@ -303,7 +306,7 @@ def simulation(des, rand_generator, process_arr, scheduler):
                         next_event_for_this_pid = Event(clock + cpuburst, pid, clock, process_transition.RUNNG_TO_BLOCK)
                         des.event_queue.insert(next_event_for_this_pid)
                     
-                    process_arr[pid].remaining_time -= cpuburst
+                    # process_arr[pid].remaining_time -= cpuburst
                     
             case process_transition.RUNNG_TO_PREEMPT:
                 # stop the current running process
@@ -329,6 +332,8 @@ def simulation(des, rand_generator, process_arr, scheduler):
                 call_scheduler = True
 
             case process_transition.RUNNG_TO_BLOCK:
+                process_arr[pid].remaining_time -= time_in_state
+                
                 # finished running now blocking
                 current_running_process = None
 
@@ -361,6 +366,7 @@ def simulation(des, rand_generator, process_arr, scheduler):
                 call_scheduler = True
 
             case process_transition.DONE:
+                process_arr[pid].remaining_time -= time_in_state
                 current_running_process = None
                 print(f"{clock} {pid} {time_in_state}: {'Done'}")
                 process_arr[pid].finish_time = clock
