@@ -6,7 +6,6 @@ import bisect
 import bisect
 
 
-maxprio = 4
 current_running_process = None
 
 # final stats
@@ -57,7 +56,7 @@ Event = namedtuple('Event', ['time', 'pid', 'time_entered_state', 'transition'])
 
 
 class Process:
-    def __init__(self, id, at, tc, cb, io, rand_generator):
+    def __init__(self, id, at, tc, cb, io, rand_generator, maxprio=4):
         self.id = id
 
         self.at = at
@@ -98,9 +97,10 @@ class DES:
 
 
 class Scheduler:
-    def __init__(self, name):
+    def __init__(self, name, quantum=1e4, maxprio=4):
         self.name = name
-        self.quantum = 1e4
+        self.quantum = quantum
+        self.maxprio = maxprio
         self.runQ = deque()
         
     def add_process(self, process):
@@ -173,10 +173,8 @@ class RR(Scheduler):
         return None
         
 class PRIO(Scheduler):
-    def __init__(self, quantum, maxprio):
-        super().__init__('PRIO')
-        self.quantum = quantum
-        self.maxprio = maxprio
+    def __init__(self, quantum, maxprio=4):
+        super().__init__('PRIO', quantum, maxprio)
         self.active_queues = [PriorityQueue() for _ in range(maxprio)]
         self.expired_queues = [PriorityQueue() for _ in range(maxprio)]
     
@@ -219,18 +217,18 @@ def get_random_numbers(filename: str) -> list[int]:
     return randos
 
 
-def get_process_array(filename: str, rand_generator: RandGenerator) -> deque[Process]:
+def get_process_array(filename: str, rand_generator: RandGenerator, maxprio:int) -> deque[Process]:
     process_array = []
     with open(filename) as f:
         pid = 0
         for line in f:
             at, tc, cb, io = [int(i) for i in line.split()]
-            process_array.append(Process(pid, at, tc, cb, io, rand_generator))
+            process_array.append(Process(pid, at, tc, cb, io, rand_generator, maxprio))
             pid += 1
     return process_array
 
 
-def print_summary(scheduler, process_arr):
+def print_summary(scheduler: Scheduler, process_arr: list[Process]):
     if scheduler.quantum < 1e4:
         print(f"{scheduler.name} {scheduler.quantum}")
     else:
@@ -346,7 +344,8 @@ def simulation(des, rand_generator, process_arr, scheduler):
                     
                 n_io_blocked += 1
 
-                print(f"{clock} {pid} {time_in_state}: {transition.name.replace('_TO_', ' -> ')}  ib={ioburst} rem={remaining_time}")
+                print(f"{clock} {pid} {time_in_state}: {transition.name.replace('_TO_', ' -> ')}  ib={ioburst} rem={process_arr[pid].remaining_time}")
+                
                 next_event_for_this_pid = Event(clock + ioburst, pid, clock, process_transition.BLOCK_TO_READY)
                 des.event_queue.insert(next_event_for_this_pid)
                 call_scheduler = True
@@ -388,11 +387,6 @@ def simulation(des, rand_generator, process_arr, scheduler):
                         des.event_queue.insert(next_event_for_this_pid)
 
 def main(args):
-    rand_generator = RandGenerator(args.rfile)
-    process_arr = get_process_array(args.inputfile, rand_generator)
-
-    des = DES(process_arr)
-    
     match args.s[0]:
         case "F":
             scheduler = FCFS()
@@ -403,7 +397,17 @@ def main(args):
         case "R":
             scheduler = RR(int(args.s[1:]))
         case "P":
-            scheduler = PRIO(int(args.s[1:]), maxprio)
+            if ":" in args.s:
+                quantum, maxprio = args.s[1:].split(":")
+                scheduler = PRIO(int(quantum), int(maxprio))
+            else:
+                scheduler = PRIO(int(args.s[1:]))
+    
+    rand_generator = RandGenerator(args.rfile)
+    process_arr = get_process_array(args.inputfile, rand_generator, scheduler.maxprio)
+
+    des = DES(process_arr)
+    
 
     simulation(des, rand_generator, process_arr, scheduler)
     print_summary(scheduler, process_arr)
@@ -416,8 +420,8 @@ if __name__ == "__main__":
     import re
     def valid_schedspec(value):
         # Use regular expression to check for valid specification
-        if not re.match(r'^[FLS]|[R|P]\d+$', value):
-            raise argparse.ArgumentTypeError(f'Invalid scheduler specification: {value}. Must be one of F, L, S, or R<num>.')
+        if not re.match(r'^[FLS]|[R|P]\d+(:\d+)?$', value):
+            raise argparse.ArgumentTypeError(f'Invalid scheduler specification: {value}. Must be one of F, L, S, R<num>, P<num>, or P<num>:<num>.')
         return value
 
 
@@ -427,6 +431,6 @@ if __name__ == "__main__":
     parser.add_argument('-s', metavar='schedspec', type=valid_schedspec, help='Scheduler specification (F, L, S, or R<num>)')
 
     args = parser.parse_args()
-    # args = parser.parse_args("-sP2 --inputfile lab2_assign/input3".split())
+    # args = parser.parse_args("-sF --inputfile lab2_assign/input0".split())
 
     main(args)
