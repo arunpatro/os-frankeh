@@ -195,6 +195,28 @@ class PRIO(Scheduler):
             if not queue.isEmpty():
                 return queue.pop()
         
+class PREPRIO(Scheduler):
+    def __init__(self, quantum, maxprio=4):
+        super().__init__('PREPRIO', quantum, maxprio)
+        self.active_queues = [PriorityQueue() for _ in range(maxprio)]
+        self.expired_queues = [PriorityQueue() for _ in range(maxprio)]
+    
+    def add_process(self, process):
+        prio = process[0] # priority
+        # insert_at = bisect.bisect_right([x[0] for x in self.active_queues[prio].queue], prio)
+        self.active_queues[prio].insert(process)
+    
+    def get_next_process(self):
+        if not any(i.queue for i in self.active_queues) and not any(i.queue for i in self.expired_queues):
+            return None
+
+        if not any(i.queue for i in self.active_queues):
+            self.active_queues, self.expired_queues = self.expired_queues, self.active_queues
+        
+        # get highest priority process in in active queue
+        for queue in self.active_queues[::-1]:
+            if not queue.isEmpty():
+                return queue.pop()  
     
 class RandGenerator:
     def __init__(self, filename):
@@ -315,7 +337,8 @@ def simulation(des, rand_generator, process_arr, scheduler):
                 print(f"{clock} {pid} {time_in_state}: {'RUNNG_TO_READY'.replace('_TO_', ' -> ')}  cb={process_arr[pid].current_cpu_burst} rem={remaining_time} prio={process_arr[pid].dynamic_priority}")
                 
                 # adjust the dynamic priority
-                if scheduler.name in ["PRIO"]:
+                # TODO need to make this generic
+                if scheduler.name in ["PRIO", "PREPRIO"]:
                     process_arr[pid].dynamic_priority -= 1
                     if process_arr[pid].dynamic_priority < 0:
                         process_arr[pid].dynamic_priority = process_arr[pid].static_priority - 1
@@ -402,6 +425,12 @@ def main(args):
                 scheduler = PRIO(int(quantum), int(maxprio))
             else:
                 scheduler = PRIO(int(args.s[1:]))
+        case "E":
+            if ":" in args.s:
+                quantum, maxprio = args.s[1:].split(":")
+                scheduler = PREPRIO(int(quantum), int(maxprio))
+            else:
+                scheduler = PREPRIO(int(args.s[1:]))
     
     rand_generator = RandGenerator(args.rfile)
     process_arr = get_process_array(args.inputfile, rand_generator, scheduler.maxprio)
@@ -420,7 +449,7 @@ if __name__ == "__main__":
     import re
     def valid_schedspec(value):
         # Use regular expression to check for valid specification
-        if not re.match(r'^[FLS]|[R|P]\d+(:\d+)?$', value):
+        if not re.match(r'^[FLS]|[R|P|E]\d+(:\d+)?$', value):
             raise argparse.ArgumentTypeError(f'Invalid scheduler specification: {value}. Must be one of F, L, S, R<num>, P<num>, or P<num>:<num>.')
         return value
 
@@ -428,9 +457,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Scheduler algorithms for OS')
     parser.add_argument('--inputfile', type=str, default="lab2_assign/input1", help='Process array input file')
     parser.add_argument('--rfile', type=str, default="lab2_assign/rfile", help='random number file')
-    parser.add_argument('-s', metavar='schedspec', type=valid_schedspec, help='Scheduler specification (F, L, S, or R<num>)')
+    parser.add_argument('-s', metavar='schedspec', type=valid_schedspec, help='Scheduler specification (F, L, S, R<num>, P<num>, P<num>:<num> or E<num>:<num>).')
 
     args = parser.parse_args()
-    # args = parser.parse_args("-sF --inputfile lab2_assign/input0".split())
+    # args = parser.parse_args("-sE4 --inputfile lab2_assign/input0".split())
 
     main(args)
