@@ -1,25 +1,29 @@
-use std::collections::VecDeque;
+use crate::process::Process;
 
-struct Scheduler {
-    name: String,
-    quantum: u64,
-    runQ: VecDeque<Process>,
+pub struct Scheduler {
+    processes: Vec<String>,
+    current: usize,
 }
 
 impl Scheduler {
-    fn new(name: String) -> Self {
+    fn new() -> Self {
         Scheduler {
-            name,
-            quantum: 1e4,
-            runQ: VecDeque::new(),
+            processes: vec![],
+            current: 0,
         }
     }
 
-    fn add_process(&mut self, process: Process) {
-        self.runQ.push_back(process);
+    fn add_process(&mut self, process: String) {
+        self.processes.push(process);
     }
 
-    fn get_next_process(&mut self) -> Option<Process> {
-        self.runQ.pop_front()
+    fn get_next_process(&mut self) -> Option<&String> {
+        if self.processes.is_empty() {
+            None
+        } else {
+            let next_process = &self.processes[self.current];
+            self.current = (self.current + 1) % self.processes.len();
+            Some(next_process)
+        }
     }
 }

@@ -1,4 +1,4 @@
-enum State {
+pub enum State {
     CREATED,
     READY,
     RUNNG,

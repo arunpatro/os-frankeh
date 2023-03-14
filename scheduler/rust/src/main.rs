@@ -1,7 +1,11 @@
 mod process;
+use process::Process;
 use std::env;
-use std::path::PathBuf;
+// use std::path::PathBuf;
 use regex::Regex;
+mod schedulers;
+use schedulers::{Scheduler};
+
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -46,9 +50,9 @@ fn main() {
 }
 
 fn valid_schedspec(value: String) -> Result<(), String> {
-    let re = Regex::new(r"^([FLS]|[R|P]\d+(:\d+)?)$").unwrap();
+    let re = Regex::new(r"^([FLS]|[R|P|E]\d+(:\d+)?)$").unwrap();
     if !re.is_match(&value) {
-        Err(format!("Invalid scheduler specification: {}. Must be one of F, L, S, R<num>, P<num>, or P<num>:<num>.", value))
+        Err(format!("Invalid scheduler specification: {}. Must be one of F, L, S, R<num>, P<num>:<num> or E<num>:<num>", value))
     } else {
         Ok(())
     }
@@ -56,27 +60,27 @@ fn valid_schedspec(value: String) -> Result<(), String> {
 
 fn main_with_args(args: Vec<String>) {
     // main code here
-    let scheduler: Box<dyn Scheduler>;
-    match args.get(2).map(|s| &**s) {
-        Some("F") => scheduler = Box::new(FCFS::new()),
-        Some("L") => scheduler = Box::new(LCFS::new()),
-        Some("S") => scheduler = Box::new(SRTF::new()),
-        Some(s) if s.starts_with("R") => scheduler = Box::new(RR::new(s[1..].parse::<usize>().unwrap())),
-        Some(s) if s.starts_with("P") => {
-            let parts = s[1..].split(":").collect::<Vec<&str>>();
-            let quantum = parts[0].parse::<usize>().unwrap();
-            let maxprio = parts.get(1).map(|&s| s.parse::<usize>().unwrap_or(4)).unwrap_or(4);
-            scheduler = Box::new(PRIO::new(quantum, maxprio));
-        },
-        _ => panic!("Invalid scheduler specification"),
-    }
+    let scheduler = Scheduler::new();
+    // match args.get(2).map(|s| &**s) {
+        // Some("F") => scheduler = Box::new(FCFS::new()),
+        // Some("L") => scheduler = Box::new(LCFS::new()),
+        // Some("S") => scheduler = Box::new(SRTF::new()),
+        // Some(s) if s.starts_with("R") => scheduler = Box::new(RR::new(s[1..].parse::<usize>().unwrap())),
+        // Some(s) if s.starts_with("P") => {
+        //     let parts = s[1..].split(":").collect::<Vec<&str>>();
+        //     let quantum = parts[0].parse::<usize>().unwrap();
+        //     let maxprio = parts.get(1).map(|&s| s.parse::<usize>().unwrap_or(4)).unwrap_or(4);
+        //     scheduler = Box::new(PRIO::new(quantum, maxprio));
+        // },
+        // _ => panic!("Invalid scheduler specification"),
+    // }
 
-    let rand_generator = RandGenerator::new(args[3].as_str());
-    let process_arr = get_process_array(args[1].as_str(), &rand_generator, scheduler.maxprio());
+    // let rand_generator = RandGenerator::new(args[3].as_str());
+    // let process_arr = get_process_array(args[1].as_str(), &rand_generator, scheduler.maxprio());
 
     // let des = DES::new(process_arr);
 
-    simulation(&des, &rand_generator, &process_arr, &*scheduler);
-    print_summary(&*scheduler, &process_arr);
+    // simulation(&des, &rand_generator, &process_arr, &*scheduler);
+    // print_summary(&*scheduler, &process_arr);
 
 }
