@@ -39,7 +39,7 @@ class PriorityQueue:
     def isEmpty(self):
         return len(self.queue) == 0
 
-    def insert(self, key, value):
+    def insertStable(self, key, value):
         insert_at = bisect.bisect_right([x[0] for x in self.queue], key)
         self.queue.insert(insert_at, (key, value))
 
@@ -96,7 +96,7 @@ class DES:
         for process in process_arr:
             process.state_start = process.at
             event = Event(process, process_transition.CREATED_TO_READY)
-            self.event_queue.insert(process.at, event)
+            self.event_queue.insertStable(process.at, event)
 
     def next_event_time(self):
         if self.event_queue.isEmpty():
@@ -116,7 +116,7 @@ class Scheduler:
         self.runQ = PriorityQueue()
 
     def add_process(self, clock, pid):
-        self.runQ.insert(clock, (pid))
+        self.runQ.insertStable(clock, (pid))
 
     def get_next_process(self):
         if self.runQ:
@@ -164,10 +164,9 @@ class PRIO(Scheduler):
         self.active_queues = [PriorityQueue() for _ in range(maxprio)]
         self.expired_queues = [PriorityQueue() for _ in range(maxprio)]
 
-    def add_process(self, process):
-        prio = process[0]  # priority
+    def add_process(self, clock, process):
         # insert_at = bisect.bisect_right([x[0] for x in self.active_queues[prio].queue], prio)
-        self.active_queues[prio].insert(process)
+        self.active_queues[process.dynamic_priority].insertStable(clock, process)
 
     def get_next_process(self):
         if not any(i.queue for i in self.active_queues) and not any(i.queue for i in self.expired_queues):
@@ -314,7 +313,7 @@ def simulation(des, rand_generator, process_arr, scheduler):
                     process.remaining_time -= scheduler.quantum
 
                     next_event = Event(process, process_transition.RUNNG_TO_READY)
-                    des.event_queue.insert(clock + scheduler.quantum, next_event)
+                    des.event_queue.insertStable(clock + scheduler.quantum, next_event)
                 else:
                     # can exhaust cpuburst now, so send to block or done
                     cpu_time += cpuburst
@@ -323,10 +322,10 @@ def simulation(des, rand_generator, process_arr, scheduler):
                     if (cpuburst >= process.remaining_time):
                         # done with this process
                         next_event = Event(process, process_transition.DONE)
-                        des.event_queue.insert(clock + cpuburst, next_event)
+                        des.event_queue.insertStable(clock + cpuburst, next_event)
                     else:
                         next_event = Event(process, process_transition.RUNNG_TO_BLOCK)
-                        des.event_queue.insert(clock + cpuburst, next_event)
+                        des.event_queue.insertStable(clock + cpuburst, next_event)
 
                     # process_arr[pid].remaining_time -= cpuburst
 
@@ -349,7 +348,7 @@ def simulation(des, rand_generator, process_arr, scheduler):
                     if process.dynamic_priority < 0:
                         process.dynamic_priority = process.static_priority - 1
                         # same as add process but insert into expired queue
-                        scheduler.expired_queues[process.dynamic_priority].insert(clock, process)
+                        scheduler.expired_queues[process.dynamic_priority].insertStable(clock, process)
                     else:
                         scheduler.add_process(clock, process)
                 else:
@@ -378,7 +377,7 @@ def simulation(des, rand_generator, process_arr, scheduler):
                 process.state_start = clock
 
                 next_event = Event(process, process_transition.BLOCK_TO_READY)
-                des.event_queue.insert(clock + ioburst, next_event)
+                des.event_queue.insertStable(clock + ioburst, next_event)
                 call_scheduler = True
 
             case process_transition.BLOCK_TO_READY:
@@ -406,7 +405,7 @@ def simulation(des, rand_generator, process_arr, scheduler):
                         desc = "YES"
                         # if yes, then preempt and stop the current running process, delete the current running process event and modify it to be a ready_to_running event
                         # des.event_queue.delete(pid=current_running_process)
-                        # des.event_queue.insert(Event(clock, current_running_process, clock - process_arr[current_running_process].last_run_start_at, process_transition.RUNNG_TO_READY))
+                        # des.event_queue.insertStable(Event(clock, current_running_process, clock - process_arr[current_running_process].last_run_start_at, process_transition.RUNNG_TO_READY))
                     else:
                         desc = "NO"
 
@@ -438,7 +437,7 @@ def simulation(des, rand_generator, process_arr, scheduler):
                     if item:
                         _, next_process = item
                         next_event = Event(next_process, process_transition.READY_TO_RUNNG)
-                        des.event_queue.insert(clock, next_event)
+                        des.event_queue.insertStable(clock, next_event)
 
         if debug_mode:
             print(f"AFTER DOING EVENT + SCHEDULING {des.event_queue.queue=}")
