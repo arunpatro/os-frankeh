@@ -1,3 +1,5 @@
+use crate::rand_generator::RandGenerator;
+
 pub enum State {
     CREATED,
     READY,
@@ -15,7 +17,6 @@ pub struct Process {
 
     state: State,
     remaining: usize,
-    io_remaining: usize,
     start: usize,
     end: usize,
     wait: usize,
@@ -26,7 +27,7 @@ pub struct Process {
 }
 
 impl Process {
-    pub fn new(id: usize, at: usize, tc: usize, cb: usize, io: usize) -> Process {
+    pub fn new(id: usize, at: usize, tc: usize, cb: usize, io: usize, randgen:&RandGenerator, maxprio:usize) -> Process {
         Process {
             id,
             at,
@@ -35,7 +36,6 @@ impl Process {
             io,
             state: State::CREATED,
             remaining: tc,
-            io_remaining: 0,
             start: 0,
             end: 0,
             wait: 0,

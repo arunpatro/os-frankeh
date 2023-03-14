@@ -6,18 +6,18 @@ pub struct Scheduler {
 }
 
 impl Scheduler {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Scheduler {
             processes: vec![],
             current: 0,
         }
     }
 
-    fn add_process(&mut self, process: String) {
+    pub fn add_process(&mut self, process: String) {
         self.processes.push(process);
     }
 
-    fn get_next_process(&mut self) -> Option<&String> {
+    pub fn get_next_process(&mut self) -> Option<&String> {
         if self.processes.is_empty() {
             None
         } else {
