@@ -1,7 +1,7 @@
 from collections import deque
 from enum import Enum
 import heapq
-from collections import deque, namedtuple
+from collections import namedtuple
 import bisect
 import bisect
 
@@ -26,16 +26,15 @@ class process_state(Enum):
 class process_transition(Enum):
     CREATED_TO_READY = 1
     READY_TO_RUNNG = 2
-    RUNNG_TO_PREEMPT = 3
+    RUNNG_TO_READY = 3
     RUNNG_TO_BLOCK = 4
     BLOCK_TO_READY = 5
-    RUNNG_TO_READY = 6
-    DONE = 7
+    DONE = 6
 
 
 class PriorityQueue:
     def __init__(self):
-        self.queue = deque()
+        self.queue = []
 
     def isEmpty(self):
         return len(self.queue) == 0
@@ -49,7 +48,17 @@ class PriorityQueue:
         if self.isEmpty():
             return None
 
-        return self.queue.popleft()
+        return self.queue.pop(0)
+    
+    def delete(self, pid):
+        for i, (_, key, _, _) in enumerate(self.queue):
+            if key == pid:
+                del self.queue[i]
+                return
+                
+    
+    def __repr__(self) -> str:
+        return str(list(self.queue))
 
 
 Event = namedtuple('Event', ['time', 'pid', 'time_entered_state', 'transition'])
@@ -75,6 +84,8 @@ class Process:
         self.prempted = False
         
         self.current_cpu_burst = None
+        
+        self.last_run_start_at = None
 
 
 class DES:
@@ -271,8 +282,18 @@ def print_summary(scheduler: Scheduler, process_arr: list[Process]):
 
 
 def simulation(des, rand_generator, process_arr, scheduler):
-    global last_process_finish_time, cpu_time, current_running_process, n_io_blocked, io_start_time, total_io_time
+    global last_process_finish_time, cpu_time, current_running_process, n_io_blocked, io_start_time, total_io_time, debug_mode
     while (event := des.next_event()):
+        if debug_mode:
+            print("\ndebug info (capture new event):")
+            print(f"{event=}")
+            print(f"{scheduler.active_queues=}")
+            print(f"{scheduler.expired_queues=}")
+            print(f"BEFORE DOING EVENT {des.event_queue.queue=}")
+            print(f"{current_running_process=}, {n_io_blocked=}, {io_start_time=}, {total_io_time=}, {cpu_time=}, {last_process_finish_time=}")
+            for process in process_arr:
+                print(f"{process.id=} {process.remaining_time=} {process.dynamic_priority=} {process.prempted=}")
+        
         clock, pid, time_entered_state, transition = event
         time_in_state = clock - time_entered_state
         remaining_time = process_arr[pid].remaining_time
@@ -297,6 +318,7 @@ def simulation(des, rand_generator, process_arr, scheduler):
                     cpuburst = process_arr[pid].current_cpu_burst
                     
                 print(f"{clock} {pid} {time_in_state}: {transition.name.replace('_TO_', ' -> ')} cb={cpuburst} rem={remaining_time} prio={process_arr[pid].dynamic_priority}")
+                process_arr[pid]
 
                 # increase cw time
                 process_arr[pid].cw += time_in_state
@@ -311,7 +333,7 @@ def simulation(des, rand_generator, process_arr, scheduler):
                     cpu_time += scheduler.quantum
                     process_arr[pid].remaining_time -= scheduler.quantum
                     
-                    next_event_for_this_pid = Event(clock + scheduler.quantum, pid, clock, process_transition.RUNNG_TO_PREEMPT)
+                    next_event_for_this_pid = Event(clock + scheduler.quantum, pid, clock, process_transition.RUNNG_TO_READY)
                     des.event_queue.insert(next_event_for_this_pid)
                 else:
                     # can exhaust cpuburst now, so send to block or done
@@ -328,7 +350,7 @@ def simulation(des, rand_generator, process_arr, scheduler):
                     
                     # process_arr[pid].remaining_time -= cpuburst
                     
-            case process_transition.RUNNG_TO_PREEMPT:
+            case process_transition.RUNNG_TO_READY:
                 # stop the current running process
                 current_running_process = None
                 
@@ -374,6 +396,10 @@ def simulation(des, rand_generator, process_arr, scheduler):
                 call_scheduler = True
 
             case process_transition.BLOCK_TO_READY:
+                ## when a process is ready from block state, check if it is more important than the current running process
+                ## cond1 = the block_to_ready process has higher priority than the current running process
+                ## cond2 = the running process doesn't have any pending event for current time
+                
                 # update n_io_blocked
                 n_io_blocked -= 1
                 if n_io_blocked == 0:
@@ -384,7 +410,25 @@ def simulation(des, rand_generator, process_arr, scheduler):
                 
                 process_arr[pid].io_time += time_in_state
                 print(f"{clock} {pid} {time_in_state}: {transition.name.replace('_TO_', ' -> ')}")
-                scheduler.add_process((process_arr[pid].dynamic_priority, pid, clock, remaining_time))
+                
+                if current_running_process is not None:
+                    cond1 = process_arr[pid].dynamic_priority > process_arr[current_running_process].dynamic_priority
+                    cond2 = [e for e in des.event_queue.queue if e.pid == current_running_process][0].time != clock #current running process doesn't have any pending event for current time
+                    if cond1 and cond2:
+                        desc = "YES"
+                        # if yes, then preempt and stop the current running process, delete the current running process event and modify it to be a ready_to_running event
+                        # des.event_queue.delete(pid=current_running_process)
+                        # des.event_queue.insert(Event(clock, current_running_process, clock - process_arr[current_running_process].last_run_start_at, process_transition.RUNNG_TO_READY))
+                    else:
+                        desc = "NO"
+                        
+                    scheduler.add_process((process_arr[pid].dynamic_priority, pid, clock, remaining_time))
+                    
+                    print(f"    --> PrioPreempt Cond1={int(cond1)} Cond2={int(cond2)} ({current_running_process}) --> {desc}")
+                else:
+                    scheduler.add_process((process_arr[pid].dynamic_priority, pid, clock, remaining_time))
+                    pass
+                    
                 call_scheduler = True
 
             case process_transition.DONE:
@@ -395,6 +439,8 @@ def simulation(des, rand_generator, process_arr, scheduler):
                 process_arr[pid].turnaround_time = clock - process_arr[pid].at
                 last_process_finish_time = max(last_process_finish_time, clock)
                 call_scheduler = True
+            case _:
+                raise
 
         if (call_scheduler):
             if des.next_event_time() == clock:
@@ -408,6 +454,10 @@ def simulation(des, rand_generator, process_arr, scheduler):
                         dyna_prio, current_running_process, ready_at_time, remaining_time = item
                         next_event_for_this_pid = Event(clock, current_running_process, ready_at_time, process_transition.READY_TO_RUNNG)
                         des.event_queue.insert(next_event_for_this_pid)
+        
+        if debug_mode:
+            print(f"AFTER DOING EVENT + SCHEDULING {des.event_queue.queue=}")
+        
 
 def main(args):
     match args.s[0]:
@@ -452,14 +502,18 @@ if __name__ == "__main__":
         if not re.match(r'^[FLS]|[R|P|E]\d+(:\d+)?$', value):
             raise argparse.ArgumentTypeError(f'Invalid scheduler specification: {value}. Must be one of F, L, S, R<num>, P<num>, or P<num>:<num>.')
         return value
-
+    
+    # debug_mode = False
 
     parser = argparse.ArgumentParser(description='Scheduler algorithms for OS')
     parser.add_argument('--inputfile', type=str, default="lab2_assign/input1", help='Process array input file')
     parser.add_argument('--rfile', type=str, default="lab2_assign/rfile", help='random number file')
     parser.add_argument('-s', metavar='schedspec', type=valid_schedspec, help='Scheduler specification (F, L, S, R<num>, P<num>, P<num>:<num> or E<num>:<num>).')
+    parser.add_argument('--debug', action='store_true', help='Enable debug mode')
 
     args = parser.parse_args()
-    # args = parser.parse_args("-sE4 --inputfile lab2_assign/input0".split())
+    args = parser.parse_args("-sE2:5 --inputfile lab2_assign/input3".split())
+    
+    debug_mode = args.debug
 
     main(args)
