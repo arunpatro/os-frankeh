@@ -157,9 +157,6 @@ class RR(Scheduler):
         super().__init__('RR')
         self.quantum = quantum
 
-    def add_process(self, clock, process):
-        self.runQ.append(process)
-
 
 class PRIO(Scheduler):
     def __init__(self, quantum, maxprio=4):
