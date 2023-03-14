@@ -48,14 +48,13 @@ class PriorityQueue:
             return None
 
         return self.queue.pop(0)
-    
+
     def delete(self, pid):
         for i, (_, key, _, _) in enumerate(self.queue):
             if key == pid:
                 del self.queue[i]
                 return
-                
-    
+
     def __repr__(self) -> str:
         return str(list(self.queue))
 
@@ -74,16 +73,16 @@ class Process:
 
         self.static_priority = rand_generator.next(maxprio)
         self.dynamic_priority = self.static_priority - 1
-        
+
         self.remaining_time = tc
         self.finish_time = None
         self.turnaround_time = None
         self.io_time = 0
         self.cw = 0
         self.prempted = False
-        
+
         self.current_cpu_burst = None
-        
+
         # new fields
         self.state = "CREATED"
         self.state_start = at
@@ -115,122 +114,101 @@ class Scheduler:
         self.quantum = quantum
         self.maxprio = maxprio
         self.runQ = PriorityQueue()
-        
+
     def add_process(self, clock, pid):
         self.runQ.insert(clock, (pid))
-        
+
     def get_next_process(self):
         if self.runQ:
             return self.runQ.pop()
 
         return None
-    
-    
+
+
 class FCFS(Scheduler):
     def __init__(self):
         super().__init__('FCFS')
-        
+
     # def add_process(self, clock, process):
         # self.runQ.append(process)
 
-    def get_next_process(self):
-        if self.runQ:
-            return self.runQ.pop()
 
-        return None
-        
-    
-    
 class LCFS(Scheduler):
     def __init__(self):
         super().__init__('LCFS')
-        
+
     def add_process(self, clock, process):
         # TODO need to modify this
         self.runQ.queue.insert(0, (clock, process))
-
-    def get_next_process(self):
-        if self.runQ:
-            return self.runQ.pop()
-
-        return None
 
 
 class SRTF(Scheduler):
     def __init__(self):
         super().__init__('SRTF')
-        
+
     def add_process(self, clock, process):
         # TODO need to modify this
         insert_at = bisect.bisect_right([x.remaining_time for _, x in self.runQ.queue], process.remaining_time)
         self.runQ.queue.insert(insert_at, (clock, process))
 
-    def get_next_process(self):
-        if self.runQ:
-            return self.runQ.pop()
 
-        return None
-    
 class RR(Scheduler):
     def __init__(self, quantum):
         super().__init__('RR')
         self.quantum = quantum
-    
-    def add_process(self, process):
-        self.runQ.append(process)
-        
-    def get_next_process(self):
-        if self.runQ:
-            return self.runQ.popleft()
 
-        return None
-        
+    def add_process(self, clock, process):
+        self.runQ.append(process)
+
+
 class PRIO(Scheduler):
     def __init__(self, quantum, maxprio=4):
         super().__init__('PRIO', quantum, maxprio)
         self.active_queues = [PriorityQueue() for _ in range(maxprio)]
         self.expired_queues = [PriorityQueue() for _ in range(maxprio)]
-    
+
     def add_process(self, process):
-        prio = process[0] # priority
+        prio = process[0]  # priority
         # insert_at = bisect.bisect_right([x[0] for x in self.active_queues[prio].queue], prio)
         self.active_queues[prio].insert(process)
-    
+
     def get_next_process(self):
         if not any(i.queue for i in self.active_queues) and not any(i.queue for i in self.expired_queues):
             return None
 
         if not any(i.queue for i in self.active_queues):
             self.active_queues, self.expired_queues = self.expired_queues, self.active_queues
-        
+
         # get highest priority process in in active queue
         for queue in self.active_queues[::-1]:
             if not queue.isEmpty():
                 return queue.pop()
-        
+
+
 class PREPRIO(Scheduler):
     def __init__(self, quantum, maxprio=4):
         super().__init__('PREPRIO', quantum, maxprio)
         self.active_queues = [PriorityQueue() for _ in range(maxprio)]
         self.expired_queues = [PriorityQueue() for _ in range(maxprio)]
-    
+
     def add_process(self, clock, process):
-        prio = process.dynamic_priority # priority
+        prio = process.dynamic_priority  # priority
         # insert_at = bisect.bisect_right([x[0] for x in self.active_queues[prio].queue], prio)
         self.active_queues[prio].insert(clock, process)
-    
+
     def get_next_process(self):
         if not any(i.queue for i in self.active_queues) and not any(i.queue for i in self.expired_queues):
             return None
 
         if not any(i.queue for i in self.active_queues):
             self.active_queues, self.expired_queues = self.expired_queues, self.active_queues
-        
+
         # get highest priority process in in active queue
         for queue in self.active_queues[::-1]:
             if not queue.isEmpty():
-                return queue.pop()  
-    
+                return queue.pop()
+
+
 class RandGenerator:
     def __init__(self, filename):
         self.random_numbers = get_random_numbers(filename)
@@ -252,7 +230,7 @@ def get_random_numbers(filename: str) -> list[int]:
     return randos
 
 
-def create_process_array(filename: str, rand_generator: RandGenerator, maxprio:int) -> deque[Process]:
+def create_process_array(filename: str, rand_generator: RandGenerator, maxprio: int) -> deque[Process]:
     process_array = []
     with open(filename) as f:
         pid = 0
@@ -268,10 +246,10 @@ def print_summary(scheduler: Scheduler, process_arr: list[Process]):
         print(f"{scheduler.name} {scheduler.quantum}")
     else:
         print(f"{scheduler.name}")
-        
+
     for process in process_arr:
         print(f"{process.id:04d}:\t{process.at}\t{process.tc}\t{process.cb}\t{process.io}\t{process.static_priority} | {process.finish_time}\t{process.turnaround_time}\t{process.io_time}\t{process.cw}")
-    
+
     # assert cpu_time == sum([p.tc for p in process_arr])
     # print(cpu_time, sum([p.tc for p in process_arr]))
     cpu_util = cpu_time / last_process_finish_time * 100
@@ -298,7 +276,7 @@ def simulation(des, rand_generator, process_arr, scheduler):
             print(f"{current_running_process=}, {n_io_blocked=}, {io_start_time=}, {total_io_time=}, {cpu_time=}, {last_process_finish_time=}")
             for process in process_arr:
                 print(f"{process.id=} {process.remaining_time=} {process.dynamic_priority=} {process.prempted=}")
-        
+
         clock, (process, transition) = event
         time_in_state = clock - process.state_start
 
@@ -311,7 +289,7 @@ def simulation(des, rand_generator, process_arr, scheduler):
                 call_scheduler = True
 
             case process_transition.READY_TO_RUNNG:
-                
+
                 # if not coming from pre-emption
                 if not process.prempted:
                     cpuburst = rand_generator.next(process.cb)
@@ -319,31 +297,31 @@ def simulation(des, rand_generator, process_arr, scheduler):
                     process.current_cpu_burst = cpuburst
                 else:
                     cpuburst = process.current_cpu_burst
-                    
+
                 print(f"{clock} {process.id} {time_in_state}: {transition.name.replace('_TO_', ' -> ')} cb={cpuburst} rem={process.remaining_time} prio={process.dynamic_priority}")
                 process.state = "RUNNG"
                 process.state_start = clock
                 current_running_process = process.id
-                
+
                 # increase cw time
                 process.cw += time_in_state
-                
+
                 # since process is running, remove prememted flag
-                process.prempted = False 
-                
+                process.prempted = False
+
                 # accumulate the cpu time, update the remaining time
                 # check quantum and decide to run normally or fire a preemt signal
                 if scheduler.quantum < cpuburst:
                     # need to set up preempt signal
                     cpu_time += scheduler.quantum
                     process.remaining_time -= scheduler.quantum
-                    
+
                     next_event = Event(process, process_transition.RUNNG_TO_READY)
                     des.event_queue.insert(clock + scheduler.quantum, next_event)
                 else:
                     # can exhaust cpuburst now, so send to block or done
                     cpu_time += cpuburst
-                    
+
                     # create event for done or blocking
                     if (cpuburst >= process.remaining_time):
                         # done with this process
@@ -352,21 +330,21 @@ def simulation(des, rand_generator, process_arr, scheduler):
                     else:
                         next_event = Event(process, process_transition.RUNNG_TO_BLOCK)
                         des.event_queue.insert(clock + cpuburst, next_event)
-                    
+
                     # process_arr[pid].remaining_time -= cpuburst
-                    
+
             case process_transition.RUNNG_TO_READY:
-                
+
                 # stop the current running process
                 current_running_process = None
-                
+
                 remaining_time = process.remaining_time
                 process.current_cpu_burst -= time_in_state
-                
+
                 print(f"{clock} {process.id} {time_in_state}: {'RUNNG_TO_READY'.replace('_TO_', ' -> ')}  cb={process.current_cpu_burst} rem={remaining_time} prio={process.dynamic_priority}")
                 process.state = "READY"
                 process.state_start = clock
-                
+
                 # adjust the dynamic priority
                 # TODO need to make this generic
                 if scheduler.name in ["PRIO", "PREPRIO"]:
@@ -379,54 +357,54 @@ def simulation(des, rand_generator, process_arr, scheduler):
                         scheduler.add_process(clock, process)
                 else:
                     scheduler.add_process(clock, process)
-                        
+
                 process.prempted = True
                 call_scheduler = True
 
             case process_transition.RUNNG_TO_BLOCK:
                 process.remaining_time -= time_in_state
-                
+
                 # finished running now blocking
                 current_running_process = None
 
                 # choose a random number between 1 and io or if io is greater than time left, choose time left
                 ioburst = rand_generator.next(process.io)
-                
+
                 # update the start time of io
                 if n_io_blocked == 0:
                     io_start_time = clock
-                    
+
                 n_io_blocked += 1
 
                 print(f"{clock} {process.id} {time_in_state}: {transition.name.replace('_TO_', ' -> ')}  ib={ioburst} rem={process.remaining_time}")
                 process.state = "BLOCK"
                 process.state_start = clock
-                
+
                 next_event = Event(process, process_transition.BLOCK_TO_READY)
                 des.event_queue.insert(clock + ioburst, next_event)
                 call_scheduler = True
 
             case process_transition.BLOCK_TO_READY:
-                ## when a process is ready from block state, check if it is more important than the current running process
-                ## cond1 = the block_to_ready process has higher priority than the current running process
-                ## cond2 = the running process doesn't have any pending event for current time
-                
+                # when a process is ready from block state, check if it is more important than the current running process
+                # cond1 = the block_to_ready process has higher priority than the current running process
+                # cond2 = the running process doesn't have any pending event for current time
+
                 # update n_io_blocked
                 n_io_blocked -= 1
                 if n_io_blocked == 0:
                     total_io_time += clock - io_start_time
-                    
+
                 # reset dynamic priority
                 process.dynamic_priority = process.static_priority - 1
-                
+
                 process.io_time += time_in_state
                 print(f"{clock} {process.id} {time_in_state}: {transition.name.replace('_TO_', ' -> ')}")
                 process.state = "READY"
                 process.state_start = clock
-                
+
                 if (current_running_process is not None) and (scheduler.name in ["PREPRIO"]):
                     cond1 = process.dynamic_priority > process_arr[current_running_process].dynamic_priority
-                    cond2 = [c for c, ev in des.event_queue.queue if ev.process.id == current_running_process][0] != clock #current running process doesn't have any pending event for current time
+                    cond2 = [c for c, ev in des.event_queue.queue if ev.process.id == current_running_process][0] != clock  # current running process doesn't have any pending event for current time
                     if cond1 and cond2:
                         desc = "YES"
                         # if yes, then preempt and stop the current running process, delete the current running process event and modify it to be a ready_to_running event
@@ -434,13 +412,13 @@ def simulation(des, rand_generator, process_arr, scheduler):
                         # des.event_queue.insert(Event(clock, current_running_process, clock - process_arr[current_running_process].last_run_start_at, process_transition.RUNNG_TO_READY))
                     else:
                         desc = "NO"
-                        
+
                     scheduler.add_process(clock, process)
-                    
+
                     print(f"    --> PrioPreempt Cond1={int(cond1)} Cond2={int(cond2)} ({current_running_process}) --> {desc}")
                 else:
                     scheduler.add_process(clock, process)
-                    
+
                 call_scheduler = True
 
             case process_transition.DONE:
@@ -464,10 +442,10 @@ def simulation(des, rand_generator, process_arr, scheduler):
                         _, next_process = item
                         next_event = Event(next_process, process_transition.READY_TO_RUNNG)
                         des.event_queue.insert(clock, next_event)
-        
+
         if debug_mode:
             print(f"AFTER DOING EVENT + SCHEDULING {des.event_queue.queue=}")
-        
+
 
 def main(args):
     match args.s[0]:
@@ -491,28 +469,26 @@ def main(args):
                 scheduler = PREPRIO(int(quantum), int(maxprio))
             else:
                 scheduler = PREPRIO(int(args.s[1:]))
-    
+
     rand_generator = RandGenerator(args.rfile)
     process_arr = create_process_array(args.inputfile, rand_generator, scheduler.maxprio)
 
     des = DES(process_arr)
-    
 
     simulation(des, rand_generator, process_arr, scheduler)
     print_summary(scheduler, process_arr)
 
 
-
-
 if __name__ == "__main__":
     import argparse
     import re
+
     def valid_schedspec(value):
         # Use regular expression to check for valid specification
         if not re.match(r'^[FLS]|[R|P|E]\d+(:\d+)?$', value):
             raise argparse.ArgumentTypeError(f'Invalid scheduler specification: {value}. Must be one of F, L, S, R<num>, P<num>, or P<num>:<num>.')
         return value
-    
+
     # debug_mode = False
 
     parser = argparse.ArgumentParser(description='Scheduler algorithms for OS')
@@ -524,7 +500,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     # args = parser.parse_args("-sS --inputfile lab2_assign/input3".split())
     # args = parser.parse_args("-sE2:5 --inputfile lab2_assign/input3".split())
-    
+
     debug_mode = args.debug
 
     main(args)
