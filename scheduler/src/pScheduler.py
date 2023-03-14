@@ -9,7 +9,6 @@ import bisect
 current_running_process = None
 
 # final stats
-last_process_finish_time = float('-inf')
 cpu_time = 0
 total_io_time = 0
 n_io_blocked = 0
@@ -50,8 +49,8 @@ class PriorityQueue:
         return self.queue.pop(0)
 
     def delete(self, pid):
-        for i, (_, key, _, _) in enumerate(self.queue):
-            if key == pid:
+        for i, (_, (proc, _)) in enumerate(self.queue):
+            if proc.id == pid:
                 del self.queue[i]
                 return
 
@@ -129,9 +128,6 @@ class FCFS(Scheduler):
     def __init__(self):
         super().__init__('FCFS')
 
-    # def add_process(self, clock, process):
-        # self.runQ.append(process)
-
 
 class LCFS(Scheduler):
     def __init__(self):
@@ -190,7 +186,7 @@ class PREPRIO(Scheduler):
     def add_process(self, clock, process):
         prio = process.dynamic_priority  # priority
         # insert_at = bisect.bisect_right([x[0] for x in self.active_queues[prio].queue], prio)
-        self.active_queues[prio].insert(clock, process)
+        self.active_queues[prio].insertStable(clock, process)
 
     def get_next_process(self):
         if not any(i.queue for i in self.active_queues) and not any(i.queue for i in self.expired_queues):
@@ -248,6 +244,7 @@ def print_summary(scheduler: Scheduler, process_arr: list[Process]):
 
     # assert cpu_time == sum([p.tc for p in process_arr])
     # print(cpu_time, sum([p.tc for p in process_arr]))
+    last_process_finish_time = max([p.finish_time for p in process_arr])
     cpu_util = cpu_time / last_process_finish_time * 100
     io_util = total_io_time / last_process_finish_time * 100
     avg_tat = sum([p.turnaround_time for p in process_arr]) / len(process_arr)
@@ -269,7 +266,7 @@ def simulation(des, rand_generator, process_arr, scheduler):
             else:
                 print(f"{scheduler.runQ=}")
             print(f"BEFORE DOING EVENT {des.event_queue.queue=}")
-            print(f"{current_running_process=}, {n_io_blocked=}, {io_start_time=}, {total_io_time=}, {cpu_time=}, {last_process_finish_time=}")
+            print(f"{current_running_process=}, {n_io_blocked=}, {io_start_time=}, {total_io_time=}, {cpu_time=}")
             for process in process_arr:
                 print(f"{process.id=} {process.remaining_time=} {process.dynamic_priority=} {process.prempted=}")
 
@@ -334,10 +331,12 @@ def simulation(des, rand_generator, process_arr, scheduler):
                 # stop the current running process
                 current_running_process = None
 
-                remaining_time = process.remaining_time
+                if process.prempted:
+                    process.remaining_time -= time_in_state
+                    
                 process.current_cpu_burst -= time_in_state
 
-                print(f"{clock} {process.id} {time_in_state}: {'RUNNG_TO_READY'.replace('_TO_', ' -> ')}  cb={process.current_cpu_burst} rem={remaining_time} prio={process.dynamic_priority}")
+                print(f"{clock} {process.id} {time_in_state}: {'RUNNG_TO_READY'.replace('_TO_', ' -> ')}  cb={process.current_cpu_burst} rem={process.remaining_time} prio={process.dynamic_priority}")
                 process.state = "READY"
                 process.state_start = clock
 
@@ -404,8 +403,9 @@ def simulation(des, rand_generator, process_arr, scheduler):
                     if cond1 and cond2:
                         desc = "YES"
                         # if yes, then preempt and stop the current running process, delete the current running process event and modify it to be a ready_to_running event
-                        # des.event_queue.delete(pid=current_running_process)
-                        # des.event_queue.insertStable(Event(clock, current_running_process, clock - process_arr[current_running_process].last_run_start_at, process_transition.RUNNG_TO_READY))
+                        des.event_queue.delete(current_running_process)
+                        process_arr[current_running_process].prempted = True
+                        des.event_queue.insertStable(clock, Event(process_arr[current_running_process], process_transition.RUNNG_TO_READY))
                     else:
                         desc = "NO"
 
@@ -419,11 +419,11 @@ def simulation(des, rand_generator, process_arr, scheduler):
 
             case process_transition.DONE:
                 process.remaining_time -= time_in_state
+                # assert process.remaining_time == 0
                 current_running_process = None
                 print(f"{clock} {process.id} {time_in_state}: {'Done'}")
                 process.finish_time = clock
                 process.turnaround_time = clock - process.at
-                last_process_finish_time = max(last_process_finish_time, clock)
                 call_scheduler = True
 
         if (call_scheduler):
@@ -494,7 +494,6 @@ if __name__ == "__main__":
     parser.add_argument('--debug', action='store_true', help='Enable debug mode')
 
     args = parser.parse_args()
-    # args = parser.parse_args("-sS --inputfile lab2_assign/input3".split())
     # args = parser.parse_args("-sE2:5 --inputfile lab2_assign/input3".split())
 
     debug_mode = args.debug
