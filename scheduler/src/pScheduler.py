@@ -265,7 +265,7 @@ def simulation(des, rand_generator, process_arr, scheduler):
                 print(f"{scheduler.expired_queues=}")
             else:
                 print(f"{scheduler.runQ=}")
-            print(f"BEFORE DOING EVENT {des.event_queue.queue=}")
+            print(f"BEFORE DOING EVENT {[(i[0], i[1][0].id, i[1][1]) for i in des.event_queue.queue]}")
             print(f"{current_running_process=}, {n_io_blocked=}, {io_start_time=}, {total_io_time=}, {cpu_time=}")
             for process in process_arr:
                 print(f"{process.id=} {process.remaining_time=} {process.dynamic_priority=} {process.prempted=}")
@@ -333,7 +333,7 @@ def simulation(des, rand_generator, process_arr, scheduler):
 
                 if process.prempted:
                     process.remaining_time -= time_in_state
-                    
+
                 process.current_cpu_burst -= time_in_state
 
                 print(f"{clock} {process.id} {time_in_state}: {'RUNNG_TO_READY'.replace('_TO_', ' -> ')}  cb={process.current_cpu_burst} rem={process.remaining_time} prio={process.dynamic_priority}")
@@ -440,7 +440,7 @@ def simulation(des, rand_generator, process_arr, scheduler):
                         des.event_queue.insertStable(clock, next_event)
 
         if debug_mode:
-            print(f"AFTER DOING EVENT + SCHEDULING {des.event_queue.queue=}")
+            print(f"AFTER DOING EVENT + SCHEDULING {[(i[0], i[1][0].id, i[1][1]) for i in des.event_queue.queue]}")
 
 
 def main(args):
@@ -485,7 +485,6 @@ if __name__ == "__main__":
             raise argparse.ArgumentTypeError(f'Invalid scheduler specification: {value}. Must be one of F, L, S, R<num>, P<num>, or P<num>:<num>.')
         return value
 
-    # debug_mode = False
 
     parser = argparse.ArgumentParser(description='Scheduler algorithms for OS')
     parser.add_argument('--inputfile', type=str, default="lab2_assign/input1", help='Process array input file')
@@ -497,5 +496,6 @@ if __name__ == "__main__":
     # args = parser.parse_args("-sE2:5 --inputfile lab2_assign/input3".split())
 
     debug_mode = args.debug
+    debug_mode = True
 
     main(args)
