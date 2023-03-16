@@ -3,7 +3,6 @@ from enum import Enum
 import heapq
 from collections import namedtuple
 import bisect
-import bisect
 
 
 current_running_process = None
@@ -85,6 +84,9 @@ class Process:
         # new fields
         self.state = "CREATED"
         self.state_start = at
+        
+    def __repr__(self) -> str:
+        return f"Process(pid={self.id} prio={self.dynamic_priority} rem={self.remaining_time}, preempted={self.prempted}, cur_cb={self.current_cpu_burst}, state={self.state})"
 
 
 class DES:
@@ -245,7 +247,8 @@ def print_summary(scheduler: Scheduler, process_arr: list[Process]):
     # assert cpu_time == sum([p.tc for p in process_arr])
     # print(cpu_time, sum([p.tc for p in process_arr]))
     last_process_finish_time = max([p.finish_time for p in process_arr])
-    cpu_util = cpu_time / last_process_finish_time * 100
+    # cpu_util = cpu_time / last_process_finish_time * 100
+    cpu_util = sum([p.tc for p in process_arr]) / last_process_finish_time * 100
     io_util = total_io_time / last_process_finish_time * 100
     avg_tat = sum([p.turnaround_time for p in process_arr]) / len(process_arr)
     avg_cw = sum([p.cw for p in process_arr]) / len(process_arr)
@@ -259,7 +262,7 @@ def simulation(des, rand_generator, process_arr, scheduler):
     while (event := des.next_event()):
         if debug_mode:
             print("\ndebug info (capture new event):")
-            print(f"clock={event[0]} pid={event[1][0].id} transition={event[1][1]}")
+            print(f"clock={event[0]} process={event[1][0]} transition={event[1][1]}")
             if scheduler.name in ["PREPRIO", "PRIO"]:
                 print(f"{scheduler.active_queues=}")
                 print(f"{scheduler.expired_queues=}")
@@ -277,8 +280,30 @@ def simulation(des, rand_generator, process_arr, scheduler):
             case process_transition.CREATED_TO_READY:
                 # must come from BLOCKED or CREATED
                 # add to run queue, no event created
-                print(f"{clock} {process.id} {time_in_state}: {transition.name.replace('_TO_', ' -> ')}")
-                scheduler.add_process(clock, process)
+                if verbose_mode:
+                    print(f"{clock} {process.id} {time_in_state}: {transition.name.replace('_TO_', ' -> ')}")
+                process.state = "READY"
+                process.state_start = clock
+
+                if (current_running_process is not None) and (scheduler.name in ["PREPRIO"]):
+                    cond1 = process.dynamic_priority > current_running_process.dynamic_priority
+                    cond2 = [c for c, ev in des.event_queue.queue if ev.process == current_running_process][0] != clock  # current running process doesn't have any pending event for current time
+                    if cond1 and cond2:
+                        desc = "YES"
+                        # if yes, then preempt and stop the current running process, delete the current running process event and modify it to be a ready_to_running event
+                        des.event_queue.delete(current_running_process.id)
+                        current_running_process.prempted = True
+                        des.event_queue.insertStable(clock, Event(current_running_process, process_transition.RUNNG_TO_READY))
+                    else:
+                        desc = "NO"
+
+                    scheduler.add_process(clock, process)
+                    
+                    if verbose_mode:
+                        print(f"    --> PrioPreempt Cond1={int(cond1)} Cond2={int(cond2)} ({current_running_process.id}) --> {desc}")
+                else:
+                    scheduler.add_process(clock, process)
+
                 call_scheduler = True
 
             case process_transition.READY_TO_RUNNG:
@@ -290,11 +315,12 @@ def simulation(des, rand_generator, process_arr, scheduler):
                     process.current_cpu_burst = cpuburst
                 else:
                     cpuburst = process.current_cpu_burst
-
-                print(f"{clock} {process.id} {time_in_state}: {transition.name.replace('_TO_', ' -> ')} cb={cpuburst} rem={process.remaining_time} prio={process.dynamic_priority}")
+                    
+                if verbose_mode:
+                    print(f"{clock} {process.id} {time_in_state}: {transition.name.replace('_TO_', ' -> ')} cb={cpuburst} rem={process.remaining_time} prio={process.dynamic_priority}")
                 process.state = "RUNNG"
                 process.state_start = clock
-                current_running_process = process.id
+                current_running_process = process
 
                 # increase cw time
                 process.cw += time_in_state
@@ -306,14 +332,11 @@ def simulation(des, rand_generator, process_arr, scheduler):
                 # check quantum and decide to run normally or fire a preemt signal
                 if scheduler.quantum < cpuburst:
                     # need to set up preempt signal
-                    cpu_time += scheduler.quantum
-                    process.remaining_time -= scheduler.quantum
 
                     next_event = Event(process, process_transition.RUNNG_TO_READY)
                     des.event_queue.insertStable(clock + scheduler.quantum, next_event)
                 else:
                     # can exhaust cpuburst now, so send to block or done
-                    cpu_time += cpuburst
 
                     # create event for done or blocking
                     if (cpuburst >= process.remaining_time):
@@ -324,19 +347,22 @@ def simulation(des, rand_generator, process_arr, scheduler):
                         next_event = Event(process, process_transition.RUNNG_TO_BLOCK)
                         des.event_queue.insertStable(clock + cpuburst, next_event)
 
-                    # process_arr[pid].remaining_time -= cpuburst
 
             case process_transition.RUNNG_TO_READY:
+                process.remaining_time -= time_in_state
+                cpu_time += time_in_state
+                
 
                 # stop the current running process
                 current_running_process = None
 
-                if process.prempted:
-                    process.remaining_time -= time_in_state
+                # if process.prempted:
+                    # process.remaining_time -= time_in_state
                     
                 process.current_cpu_burst -= time_in_state
 
-                print(f"{clock} {process.id} {time_in_state}: {'RUNNG_TO_READY'.replace('_TO_', ' -> ')}  cb={process.current_cpu_burst} rem={process.remaining_time} prio={process.dynamic_priority}")
+                if verbose_mode:
+                    print(f"{clock} {process.id} {time_in_state}: {'RUNNG_TO_READY'.replace('_TO_', ' -> ')}  cb={process.current_cpu_burst} rem={process.remaining_time} prio={process.dynamic_priority}")
                 process.state = "READY"
                 process.state_start = clock
 
@@ -358,6 +384,7 @@ def simulation(des, rand_generator, process_arr, scheduler):
 
             case process_transition.RUNNG_TO_BLOCK:
                 process.remaining_time -= time_in_state
+                cpu_time += time_in_state
 
                 # finished running now blocking
                 current_running_process = None
@@ -370,8 +397,9 @@ def simulation(des, rand_generator, process_arr, scheduler):
                     io_start_time = clock
 
                 n_io_blocked += 1
-
-                print(f"{clock} {process.id} {time_in_state}: {transition.name.replace('_TO_', ' -> ')}  ib={ioburst} rem={process.remaining_time}")
+                
+                if verbose_mode:
+                    print(f"{clock} {process.id} {time_in_state}: {transition.name.replace('_TO_', ' -> ')}  ib={ioburst} rem={process.remaining_time}")
                 process.state = "BLOCK"
                 process.state_start = clock
 
@@ -393,25 +421,27 @@ def simulation(des, rand_generator, process_arr, scheduler):
                 process.dynamic_priority = process.static_priority - 1
 
                 process.io_time += time_in_state
-                print(f"{clock} {process.id} {time_in_state}: {transition.name.replace('_TO_', ' -> ')}")
+                if verbose_mode:
+                    print(f"{clock} {process.id} {time_in_state}: {transition.name.replace('_TO_', ' -> ')}")
                 process.state = "READY"
                 process.state_start = clock
 
                 if (current_running_process is not None) and (scheduler.name in ["PREPRIO"]):
-                    cond1 = process.dynamic_priority > process_arr[current_running_process].dynamic_priority
-                    cond2 = [c for c, ev in des.event_queue.queue if ev.process.id == current_running_process][0] != clock  # current running process doesn't have any pending event for current time
+                    cond1 = process.dynamic_priority > current_running_process.dynamic_priority
+                    cond2 = [c for c, ev in des.event_queue.queue if ev.process == current_running_process][0] != clock  # current running process doesn't have any pending event for current time
                     if cond1 and cond2:
                         desc = "YES"
                         # if yes, then preempt and stop the current running process, delete the current running process event and modify it to be a ready_to_running event
-                        des.event_queue.delete(current_running_process)
-                        process_arr[current_running_process].prempted = True
-                        des.event_queue.insertStable(clock, Event(process_arr[current_running_process], process_transition.RUNNG_TO_READY))
+                        des.event_queue.delete(current_running_process.id)
+                        current_running_process.prempted = True
+                        des.event_queue.insertStable(clock, Event(current_running_process, process_transition.RUNNG_TO_READY))
                     else:
                         desc = "NO"
 
                     scheduler.add_process(clock, process)
-
-                    print(f"    --> PrioPreempt Cond1={int(cond1)} Cond2={int(cond2)} ({current_running_process}) --> {desc}")
+                    
+                    if verbose_mode:
+                        print(f"    --> PrioPreempt Cond1={int(cond1)} Cond2={int(cond2)} ({current_running_process.id}) --> {desc}")
                 else:
                     scheduler.add_process(clock, process)
 
@@ -421,7 +451,8 @@ def simulation(des, rand_generator, process_arr, scheduler):
                 process.remaining_time -= time_in_state
                 # assert process.remaining_time == 0
                 current_running_process = None
-                print(f"{clock} {process.id} {time_in_state}: {'Done'}")
+                if verbose_mode:
+                    print(f"{clock} {process.id} {time_in_state}: {'Done'}")
                 process.finish_time = clock
                 process.turnaround_time = clock - process.at
                 call_scheduler = True
@@ -492,10 +523,12 @@ if __name__ == "__main__":
     parser.add_argument('--rfile', type=str, default="lab2_assign/rfile", help='random number file')
     parser.add_argument('-s', metavar='schedspec', type=valid_schedspec, help='Scheduler specification (F, L, S, R<num>, P<num>, P<num>:<num> or E<num>:<num>).')
     parser.add_argument('--debug', action='store_true', help='Enable debug mode')
+    parser.add_argument('--verbose', action='store_true', help='Enable debug mode')
 
     args = parser.parse_args()
-    # args = parser.parse_args("-sE2:5 --inputfile lab2_assign/input3".split())
+    # args = parser.parse_args("-sE2:5 --verbose --inputfile scheduler/lab2_assign/input6 --rfile scheduler/lab2_assign/rfile".split())
 
     debug_mode = args.debug
+    verbose_mode = args.verbose
 
     main(args)

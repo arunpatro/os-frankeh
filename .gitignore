@@ -1,5 +1,5 @@
-lab1_assign
-lab2_assign
+lab1_assign/
+lab2_assign/
 
 *.dSYM
 .DS_Store
@@ -11,3 +11,6 @@ run.sh
 Cargo.lock
 # Ignore all files in the target directory/
 target/
+
+arun_out
+arun_outz
