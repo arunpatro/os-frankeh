@@ -515,10 +515,9 @@ if __name__ == "__main__":
     def valid_schedspec(value):
         # Use regular expression to check for valid specification
         if not re.match(r'^[FLS]|[R|P|E]\d+(:\d+)?$', value):
-            raise argparse.ArgumentTypeError(f'Invalid scheduler specification: {value}. Must be one of F, L, S, R<num>, P<num>, or P<num>:<num>.')
+            raise argparse.ArgumentTypeError(f'Invalid scheduler specification: {value}. Must be one of F, L, S, R<num>, P<num>, P<num>:<num> or E<num>:<num>.')
         return value
 
-    # debug_mode = False
 
     parser = argparse.ArgumentParser(description='Scheduler algorithms for OS')
     parser.add_argument('--inputfile', type=str, default="lab2_assign/input1", help='Process array input file')
