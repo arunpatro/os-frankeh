@@ -287,7 +287,8 @@ def simulation(des, rand_generator, process_arr, scheduler):
 
                 if (current_running_process is not None) and (scheduler.name in ["PREPRIO"]):
                     cond1 = process.dynamic_priority > current_running_process.dynamic_priority
-                    cond2 = [c for c, ev in des.event_queue.queue if ev.process == current_running_process][0] != clock  # current running process doesn't have any pending event for current time
+                    next_time_for_curr_proc = [c for c, ev in des.event_queue.queue if ev.process == current_running_process][0]
+                    cond2 = next_time_for_curr_proc != clock  # current running process doesn't have any pending event for current time
                     if cond1 and cond2:
                         desc = "YES"
                         # if yes, then preempt and stop the current running process, delete the current running process event and modify it to be a ready_to_running event
@@ -300,7 +301,7 @@ def simulation(des, rand_generator, process_arr, scheduler):
                     scheduler.add_process(clock, process)
                     
                     if verbose_mode:
-                        print(f"    --> PrioPreempt Cond1={int(cond1)} Cond2={int(cond2)} ({current_running_process.id}) --> {desc}")
+                        print(f"    --> PrioPreempt Cond1={int(cond1)} Cond2={int(cond2)} ({next_time_for_curr_proc - clock}) --> {desc}")
                 else:
                     scheduler.add_process(clock, process)
 
@@ -428,7 +429,8 @@ def simulation(des, rand_generator, process_arr, scheduler):
 
                 if (current_running_process is not None) and (scheduler.name in ["PREPRIO"]):
                     cond1 = process.dynamic_priority > current_running_process.dynamic_priority
-                    cond2 = [c for c, ev in des.event_queue.queue if ev.process == current_running_process][0] != clock  # current running process doesn't have any pending event for current time
+                    next_time_for_curr_proc = [c for c, ev in des.event_queue.queue if ev.process == current_running_process][0]
+                    cond2 = next_time_for_curr_proc != clock  # current running process doesn't have any pending event for current time
                     if cond1 and cond2:
                         desc = "YES"
                         # if yes, then preempt and stop the current running process, delete the current running process event and modify it to be a ready_to_running event
@@ -441,7 +443,7 @@ def simulation(des, rand_generator, process_arr, scheduler):
                     scheduler.add_process(clock, process)
                     
                     if verbose_mode:
-                        print(f"    --> PrioPreempt Cond1={int(cond1)} Cond2={int(cond2)} ({current_running_process.id}) --> {desc}")
+                        print(f"    --> PrioPreempt Cond1={int(cond1)} Cond2={int(cond2)} ({next_time_for_curr_proc - clock}) --> {desc}")
                 else:
                     scheduler.add_process(clock, process)
 
@@ -526,7 +528,7 @@ if __name__ == "__main__":
     parser.add_argument('--verbose', action='store_true', help='Enable debug mode')
 
     args = parser.parse_args()
-    # args = parser.parse_args("-sE2:5 --verbose --inputfile scheduler/lab2_assign/input6 --rfile scheduler/lab2_assign/rfile".split())
+    # args = parser.parse_args("-sE2:5 --verbose --inputfile scheduler/lab2_assign/input3 --rfile scheduler/lab2_assign/rfile".split())
 
     debug_mode = args.debug
     verbose_mode = args.verbose
