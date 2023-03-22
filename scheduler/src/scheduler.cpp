@@ -4,6 +4,7 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <list>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -158,37 +159,77 @@ class DES {
 };
 
 class Scheduler {
-   private:
-    std::vector<Process*> runQ;
-
    public:
     std::string name;
     int quantum;
     int maxprio;
+    std::list<Process*> runQ;
 
     Scheduler() {
         name = "FCFS";
-        quantum = (int)10e4;
+        quantum = (int)1e4;
         maxprio = 4;
     }
 
-    void add_process(Process* p) {
-        runQ.push_back(p);
-        // std::cout << "Added process " << p->id << " to runQ" << std::endl;
-    }
-    Process* get_next_process() {
-        if (runQ.size() > 0) {
-            Process* p = runQ[0];
-            runQ.erase(runQ.begin());
+    void add_process(Process* p) { runQ.push_back(p); }
+
+    virtual Process* get_next_process() {
+        if (!runQ.empty()) {
+            Process* p = runQ.front();
+            runQ.pop_front();
             return p;
         }
-        return NULL;
+        return nullptr;
     }
 
     bool does_preempt() { return false; }
 };
 
 class FCFS : public Scheduler {};
+
+class LCFS : public Scheduler {
+   public:
+    LCFS() { name = "LCFS"; }
+
+    Process* get_next_process() {
+        if (!runQ.empty()) {
+            Process* p = runQ.back();
+            runQ.pop_back();
+            return p;
+        }
+        return nullptr;
+    }
+};
+
+class SRTF : public Scheduler {
+   public:
+    SRTF() { name = "SRTF"; }
+
+    Process* get_next_process() {
+        if (!runQ.empty()) {
+            // Find the process with the smallest remaining time
+            auto shortest_process = std::min_element(
+                runQ.begin(), runQ.end(),
+                [](const Process* p1, const Process* p2) {
+                    return p1->remaining_time < p2->remaining_time;
+                });
+
+            Process* p = *shortest_process;
+            runQ.erase(shortest_process);
+            return p;
+        }
+
+        return nullptr;
+    }
+};
+
+class RR : public Scheduler {
+   public:
+    RR(int quantum) {
+        name = "RR";
+        this->quantum = quantum;
+    }
+};
 
 std::vector<Process*> create_process_array(std::string filename,
                                            RandGenerator* rand_generator,
@@ -465,8 +506,8 @@ void print_summary(DES* des, Scheduler* scheduler) {
     double io_util = 100.0 * (des->total_io_time / (double)finishtime);
     double throughput = 100.0 * (num_processes / (double)finishtime);
 
-    printf("SUM: %d %.2lf %.2lf %.2lf %.2lf %.3lf\n", finishtime, cpu_util, io_util,
-           avg_tat, avg_wait, throughput);
+    printf("SUM: %d %.2lf %.2lf %.2lf %.2lf %.3lf\n", finishtime, cpu_util,
+           io_util, avg_tat, avg_wait, throughput);
 }
 
 int main(int argc, char** argv) {
@@ -476,7 +517,8 @@ int main(int argc, char** argv) {
     char* randomfile = NULL;
 
     if (argc < 4) {
-        printf("Usage: %s -s <scheduler_option> <inputfile> <randomfile>\n", argv[0]);
+        printf("Usage: %s -s <scheduler_option> <inputfile> <randomfile>\n",
+               argv[0]);
         exit(EXIT_FAILURE);
     }
     while ((opt = getopt(argc, argv, "vs:")) != -1) {
@@ -503,15 +545,15 @@ int main(int argc, char** argv) {
         case 'F':
             scheduler = new FCFS();
             break;
-        // case 'L':
-        //     scheduler = new LCFS();
-        //     break;
-        // case 'S':
-        //     scheduler = new SRTF();
-        //     break;
-        // case 'R':
-        //     scheduler = new RR(atoi(&scheduler_option[1]));
-        //     break;
+        case 'L':
+            scheduler = new LCFS();
+            break;
+        case 'S':
+            scheduler = new SRTF();
+            break;
+        case 'R':
+            scheduler = new RR(atoi(&scheduler_option[1]));
+            break;
         // case 'P':
         //     if (strchr(scheduler_option, ':'))
         //     {
@@ -543,8 +585,8 @@ int main(int argc, char** argv) {
     }
 
     auto rand_generator = RandGenerator(randomfile);
-    auto process_array = create_process_array(
-        inputfile, &rand_generator, scheduler->maxprio);
+    auto process_array =
+        create_process_array(inputfile, &rand_generator, scheduler->maxprio);
     auto des = DES(process_array);
 
     simulation_loop(&des, process_array, scheduler, &rand_generator);
