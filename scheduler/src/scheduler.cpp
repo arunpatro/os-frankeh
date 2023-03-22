@@ -155,6 +155,17 @@ class DES {
         }
         return event_queue->clock;
     }
+
+    int next_event_time_for_proc(Process* p) {
+        Event* temp = event_queue;
+        while (temp != nullptr) {
+            if (temp->p == p) {
+                return temp->clock;
+            }
+            temp = temp->nextEvt;
+        }
+        return -1;
+    }
     bool empty() { return event_queue == nullptr; }
 };
 
@@ -171,7 +182,10 @@ class Scheduler {
         maxprio = 4;
     }
 
-    void add_process(Process* p) { runQ.push_back(p); }
+    virtual void add_process(Process* p) {
+        p->dynamic_prio = p->static_prio - 1;
+        runQ.push_back(p);
+    }
 
     virtual Process* get_next_process() {
         if (!runQ.empty()) {
@@ -182,7 +196,7 @@ class Scheduler {
         return nullptr;
     }
 
-    bool does_preempt() { return false; }
+    virtual bool does_preempt() { return false; }
 };
 
 class FCFS : public Scheduler {};
@@ -231,6 +245,61 @@ class RR : public Scheduler {
     }
 };
 
+class PRIO : public Scheduler {
+   public:
+    std::vector<std::list<Process*>> activeQ;
+    std::vector<std::list<Process*>> expiredQ;
+    PRIO(int quantum, int maxprio = 4) {
+        name = "PRIO";
+        this->quantum = quantum;
+        this->maxprio = maxprio;
+        activeQ.resize(maxprio);
+        expiredQ.resize(maxprio);
+    }
+
+    void add_process(Process* p) {
+        if (p->dynamic_prio < 0) {
+            p->dynamic_prio = p->static_prio - 1;
+            expiredQ[p->dynamic_prio].push_back(p);
+        } else {
+            activeQ[p->dynamic_prio].push_back(p);
+        }
+    }
+
+    Process* get_next_process() {
+        if (std::all_of(activeQ.begin(), activeQ.end(),
+                        [](std::list<Process*> q) { return q.empty(); }) &&
+            std::all_of(expiredQ.begin(), expiredQ.end(),
+                        [](std::list<Process*> q) { return q.empty(); })) {
+            return nullptr;
+        }
+
+        if (std::all_of(activeQ.begin(), activeQ.end(),
+                        [](std::list<Process*> q) { return q.empty(); })) {
+            activeQ.swap(expiredQ);
+        }
+
+        for (auto it = activeQ.rbegin(); it != activeQ.rend(); ++it) {
+            if (!it->empty()) {
+                auto nextProcess = it->front();
+                it->pop_front();
+                return nextProcess;
+            }
+        }
+
+        return nullptr;
+    }
+};
+
+class PREPRIO : public PRIO {
+   public:
+    PREPRIO(int quantum, int maxprio = 4) : PRIO(quantum, maxprio) {
+        name = "PREPRIO";
+    }
+
+    bool does_preempt() { return true; }
+};
+
 std::vector<Process*> create_process_array(std::string filename,
                                            RandGenerator* rand_generator,
                                            int maxprio) {
@@ -253,16 +322,6 @@ std::vector<Process*> create_process_array(std::string filename,
 
 void simulation_loop(DES* des, std::vector<Process*> process_array,
                      Scheduler* scheduler, RandGenerator* rand_generator) {
-    // std::cout << "Starting simulation loop" << std::endl;
-    // std::cout << "Printing the process array table" << std::endl;
-    // std::cout << "Process ID\tArrival Time\tTotal CPU Time\tCPU
-    // Burst\tIOBurst"
-    //           << std::endl;
-    // for (auto p : process_array) {
-    //     std::cout << p->id << "\t\t" << p->at << "\t\t" << p->tc << "\t\t"
-    //               << p->cb << "\t\t" << p->io << std::endl;
-    // }
-
     Process* current_running_process = NULL;
     bool call_scheduler = false;
     int cpuburst, ioburst;
@@ -363,18 +422,8 @@ void simulation_loop(DES* des, std::vector<Process*> process_array,
                 e.p->state = process_state::READY;
                 e.p->current_state_start_time = e.clock;
 
-                if (scheduler->name == "PREPRIO" || scheduler->name == "PRIO") {
-                    e.p->dynamic_prio -= 1;
-                    if (e.p->dynamic_prio < 0) {
-                        e.p->dynamic_prio = e.p->static_prio - 1;
-                        // TODO
-                        // scheduler->expired_queues[e.p->dynamic_prio].push_back(e.p);
-                    } else {
-                        scheduler->add_process(e.p);
-                    }
-                } else {
-                    scheduler->add_process(e.p);
-                }
+                e.p->dynamic_prio -= 1;
+                scheduler->add_process(e.p);
 
                 e.p->preempted = true;
                 call_scheduler = true;
@@ -417,19 +466,13 @@ void simulation_loop(DES* des, std::vector<Process*> process_array,
                 e.p->state = process_state::READY;
                 e.p->current_state_start_time = e.clock;
 
-                if ((current_running_process != NULL) &
-                    (scheduler->name == "PREPRIO")) {
+                if ((current_running_process != nullptr) &
+                    (scheduler->does_preempt())) {
                     bool cond1 = e.p->dynamic_prio >
                                  current_running_process->dynamic_prio;
-                    int next_time_for_curr_proc = -1;
 
-                    Event* temp = des->event_queue;
-                    while (temp != NULL) {
-                        if (temp->p == current_running_process) {
-                            next_time_for_curr_proc = temp->clock;
-                            break;
-                        }
-                    }
+                    int next_time_for_curr_proc =
+                        des->next_event_time_for_proc(current_running_process);
 
                     bool cond2 = next_time_for_curr_proc != e.clock;
                     if (cond1 && cond2) {
@@ -461,12 +504,12 @@ void simulation_loop(DES* des, std::vector<Process*> process_array,
                 continue;
             } else {
                 call_scheduler = false;
-                if (current_running_process == NULL) {
+                if (current_running_process == nullptr) {
                     auto proc = scheduler->get_next_process();
-                    if (proc != NULL) {
+                    if (proc != nullptr) {
                         des->add_event(new Event(
                             e.clock, proc, process_transition::READY_TO_RUNNING,
-                            NULL));
+                            nullptr));
                     }
                 }
             }
@@ -554,31 +597,24 @@ int main(int argc, char** argv) {
         case 'R':
             scheduler = new RR(atoi(&scheduler_option[1]));
             break;
-        // case 'P':
-        //     if (strchr(scheduler_option, ':'))
-        //     {
-        //         char *quantum_str = strtok(&scheduler_option[1], ":");
-        //         char *maxprio_str = strtok(NULL, ":");
-        //         scheduler = new PRIO(atoi(quantum_str), atoi(maxprio_str));
-        //     }
-        //     else
-        //     {
-        //         scheduler = new PRIO(atoi(&scheduler_option[1]));
-        //     }
-        //     break;
-        // case 'E':
-        //     if (strchr(scheduler_option, ':'))
-        //     {
-        //         char *quantum_str = strtok(&scheduler_option[1], ":");
-        //         char *maxprio_str = strtok(NULL, ":");
-        //         scheduler = new PREPRIO(atoi(quantum_str),
-        //         atoi(maxprio_str));
-        //     }
-        //     else
-        //     {
-        //         scheduler = new PREPRIO(atoi(&scheduler_option[1]));
-        //     }
-        //     break;
+        case 'P':
+            if (strchr(scheduler_option, ':')) {
+                char* quantum_str = strtok(&scheduler_option[1], ":");
+                char* maxprio_str = strtok(NULL, ":");
+                scheduler = new PRIO(atoi(quantum_str), atoi(maxprio_str));
+            } else {
+                scheduler = new PRIO(atoi(&scheduler_option[1]));
+            }
+            break;
+        case 'E':
+            if (strchr(scheduler_option, ':')) {
+                char* quantum_str = strtok(&scheduler_option[1], ":");
+                char* maxprio_str = strtok(NULL, ":");
+                scheduler = new PREPRIO(atoi(quantum_str), atoi(maxprio_str));
+            } else {
+                scheduler = new PREPRIO(atoi(&scheduler_option[1]));
+            }
+            break;
         default:
             printf("Invalid scheduler option provided. Exiting.\n");
             exit(EXIT_FAILURE);
