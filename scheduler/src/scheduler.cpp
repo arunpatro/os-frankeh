@@ -474,8 +474,11 @@ int main(int argc, char** argv) {
     char* scheduler_option = NULL;
     char* inputfile = NULL;
     char* randomfile = NULL;
-    
-    char* scheduler_option = "F";
+
+    if (argc < 4) {
+        printf("Usage: %s -s <scheduler_option> <inputfile> <randomfile>\n", argv[0]);
+        exit(EXIT_FAILURE);
+    }
     while ((opt = getopt(argc, argv, "vs:")) != -1) {
         switch (opt) {
             case 'v':
@@ -492,8 +495,8 @@ int main(int argc, char** argv) {
         exit(EXIT_FAILURE);
     }
 
-    std::cout << "Input file: " << inputfile << std::endl;
-    std::cout << "Random file: " << randomfile << std::endl;
+    inputfile = argv[optind];
+    randomfile = argv[optind + 1];
 
     Scheduler* scheduler;
     switch (scheduler_option[0]) {
@@ -539,9 +542,9 @@ int main(int argc, char** argv) {
             exit(EXIT_FAILURE);
     }
 
-    auto rand_generator = RandGenerator("../lab2_assign/rfile");
+    auto rand_generator = RandGenerator(randomfile);
     auto process_array = create_process_array(
-        "../lab2_assign/input1", &rand_generator, scheduler->maxprio);
+        inputfile, &rand_generator, scheduler->maxprio);
     auto des = DES(process_array);
 
     simulation_loop(&des, process_array, scheduler, &rand_generator);
