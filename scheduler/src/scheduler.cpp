@@ -225,7 +225,9 @@ void simulation_loop(DES* des, std::vector<Process*> process_array,
 
     Process* current_running_process = NULL;
     bool call_scheduler = false;
-    int cpuburst, ioburst, n_io_blocked, io_start_time;
+    int cpuburst, ioburst;
+    int n_io_blocked = 0;
+    int io_start_time;
 
     while (!des->empty()) {
         Event e = des->next_event();
@@ -464,7 +466,7 @@ void print_summary(DES* des, Scheduler* scheduler) {
     double io_util = 100.0 * (des->total_io_time / (double)finishtime);
     double throughput = 100.0 * (num_processes / (double)finishtime);
 
-    printf("SUM: %d %.2f %.2f %.2f %.2f %.3f", finishtime, cpu_util, io_util,
+    printf("SUM: %d %.2f %.2f %.2f %.2f %.3f\n", finishtime, cpu_util, io_util,
            avg_tat, avg_wait, throughput);
 }
 
@@ -479,8 +481,6 @@ int main(int argc, char** argv) {
                 break;
             case 's':
                 scheduler_option = optarg;
-                // std::cout << "Scheduler option: " << scheduler_option
-                //   << std::endl;
                 break;
         }
     }
