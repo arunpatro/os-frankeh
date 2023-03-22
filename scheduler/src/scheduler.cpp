@@ -121,6 +121,9 @@ class DES {
             prev = temp;
             temp = temp->nextEvt;
         }
+        if (temp == nullptr) {
+            prev->nextEvt = e;
+        }
     }
 
     Event next_event() {
@@ -403,8 +406,7 @@ void simulation_loop(DES* des, std::vector<Process*> process_array,
                 e.p->remaining_time -= time_in_state;
                 current_running_process = NULL;
                 if (verbose_mode) {
-                    printf("%d %d %d: RUNNG -> DONE\n", e.clock, e.p->id,
-                           time_in_state);
+                    printf("%d %d %d: Done\n", e.clock, e.p->id, time_in_state);
                 }
                 e.p->finish_time = e.clock;
                 e.p->turnaround_time = e.p->finish_time - e.p->at;
@@ -431,8 +433,13 @@ void simulation_loop(DES* des, std::vector<Process*> process_array,
 }
 
 void print_summary(DES* des, Scheduler* scheduler) {
+    if (scheduler->quantum < 1e4) {
+        printf("%s %d\n", scheduler->name.c_str(), scheduler->quantum);
+    } else {
+        printf("%s\n", scheduler->name.c_str());
+    }
     for (auto p : des->process_array) {
-        printf("%d %d %d %d %d | %d %d %d %d %d\n", p->id, p->at, p->tc, p->cb,
+        printf("%04d: %4d %4d %4d %4d %d |  %4d  %4d  %4d  %4d\n", p->id, p->at, p->tc, p->cb,
                p->io, p->static_prio, p->finish_time, p->turnaround_time,
                p->io_time, p->waiting_time);
     }
