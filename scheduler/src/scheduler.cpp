@@ -1,4 +1,3 @@
-
 #include <unistd.h>
 
 #include <cstdio>
@@ -441,9 +440,9 @@ void print_summary(DES* des, Scheduler* scheduler) {
         printf("%s\n", scheduler->name.c_str());
     }
     for (auto p : des->process_array) {
-        printf("%04d: %4d %4d %4d %4d %d |  %4d  %4d  %4d  %4d\n", p->id, p->at, p->tc, p->cb,
-               p->io, p->static_prio, p->finish_time, p->turnaround_time,
-               p->io_time, p->waiting_time);
+        printf("%04d: %4d %4d %4d %4d %1d | %5d %5d %5d %5d\n", p->id, p->at,
+               p->tc, p->cb, p->io, p->static_prio, p->finish_time,
+               p->turnaround_time, p->io_time, p->waiting_time);
     }
 
     int num_processes = des->process_array.size();
@@ -466,13 +465,16 @@ void print_summary(DES* des, Scheduler* scheduler) {
     double io_util = 100.0 * (des->total_io_time / (double)finishtime);
     double throughput = 100.0 * (num_processes / (double)finishtime);
 
-    printf("SUM: %d %.2f %.2f %.2f %.2f %.3f\n", finishtime, cpu_util, io_util,
+    printf("SUM: %d %.2lf %.2lf %.2lf %.2lf %.3lf\n", finishtime, cpu_util, io_util,
            avg_tat, avg_wait, throughput);
 }
 
 int main(int argc, char** argv) {
     int opt;
-    // char* scheduler_option = NULL;
+    char* scheduler_option = NULL;
+    char* inputfile = NULL;
+    char* randomfile = NULL;
+    
     char* scheduler_option = "F";
     while ((opt = getopt(argc, argv, "vs:")) != -1) {
         switch (opt) {
@@ -489,6 +491,9 @@ int main(int argc, char** argv) {
         printf("No scheduler option provided. Exiting.\n");
         exit(EXIT_FAILURE);
     }
+
+    std::cout << "Input file: " << inputfile << std::endl;
+    std::cout << "Random file: " << randomfile << std::endl;
 
     Scheduler* scheduler;
     switch (scheduler_option[0]) {
