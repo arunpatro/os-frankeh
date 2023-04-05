@@ -28,8 +28,13 @@ class PTE:
 
 
 class Pager:
+    def __init__(self):
+        self.hand = 0
+
     def select_victim_frame(self):
-        raise NotImplementedError()
+        hand = self.hand
+        self.hand = (hand + 1) % 64
+        return hand
 
 
 class MMU:
@@ -37,14 +42,18 @@ class MMU:
         self.frame_table = [Frame() for _ in range(max_frames)]
         self.free_frames = deque(range(max_frames))
         self.page_table = [PTE() for _ in range(64)]
+        self.pager = Pager()
 
     def get_frame(self) -> int:
         if len(self.free_frames) > 0:
             frame_idx = self.free_frames.popleft()
             return frame_idx
         else:
-            # TODO: Implement page replacement algorithm
-            return None #self.pager.select_victim_frame()
+            frame_idx = self.pager.select_victim_frame()
+            print(f" UNMAP {self.frame_table[frame_idx].pid}:{self.frame_table[frame_idx].vpage}")
+            if self.page_table[self.frame_table[frame_idx].vpage].modified:
+                print(f" OUT")# {self.frame_table[frame_idx].pid}:{self.frame_table[frame_idx].vpage}")
+            return frame_idx
 
     def process_instruction(self, operation, vpage):
         if operation == 'c':
@@ -62,7 +71,18 @@ class MMU:
                 print('ZERO')
                 print(f'MAP {frame_idx}')
         elif operation == 'w':
-            pass
+            if self.page_table[vpage].present:
+                pass
+            else:
+                frame_idx = self.get_frame()
+                frame = self.frame_table[frame_idx]
+                self.page_table[vpage].present = True
+                self.page_table[vpage].frame = frame
+                self.page_table[vpage].modified = True
+                frame.pid = 0
+                frame.vpage = vpage
+                print('ZERO')
+                print(f'MAP {frame_idx}')
         else:
             raise ValueError(f'Invalid operation: {operation}')
 
@@ -119,12 +139,18 @@ def main(args):
     processes, instructions = read_input_file(args.inputfile)
     # print(processes)
     # print(instructions)
-    
+
     mmu = MMU(args.f)
 
     for idx, (operation, address) in enumerate(instructions):
         print(f"{idx}: ==> {operation} {address}")
         mmu.process_instruction(operation, address)
+        
+    ## print end stats in this format
+    # PT[0]: 0:R-- 1:RM- * 3:R-- 4:R-- 5:RM- * * 8:R-- * * # * 13:R-- * * * * * * # 21:R-- * * 24:R-- * * * 28:RM- * 30:R-- 31:R-- * * * * * * 38:RM- * * * * * 44:R-- * * * 48:RM- * * # * * * # 56:R-- * * * * * * *
+    # FT: 0:28 0:56 0:31 0:4 0:48 0:3 0:5 0:24 0:8 0:1 0:38 0:0 0:30 0:13 0:44 0:21
+    # PROC[0]: U=10 M=26 I=0 O=4 FI=0 FO=0 Z=26 SV=0 SP=0
+    # TOTALCOST 31 1 0 28260 4
 
 
 if __name__ == "__main__":
@@ -154,11 +180,11 @@ if __name__ == "__main__":
     inputfile = args.inputfile
     randomfile = args.randomfile
 
-    print("Options:")
-    print(f"Number of frames: {num_frames}")
-    print(f"Algorithm: {algorithm}")
-    print(f"Options: {options}")
-    print(f"Input file: {inputfile}")
-    print(f"Random file: {randomfile}")
+    # print("Options:")
+    # print(f"Number of frames: {num_frames}")
+    # print(f"Algorithm: {algorithm}")
+    # print(f"Options: {options}")
+    # print(f"Input file: {inputfile}")
+    # print(f"Random file: {randomfile}")
 
     main(args)
