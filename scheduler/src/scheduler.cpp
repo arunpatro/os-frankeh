@@ -1,12 +1,12 @@
 #include <unistd.h>
 
+#include <algorithm>
 #include <cstdio>
-#include <cstring>
+// #include <cstring>
 #include <fstream>
-#include <iostream>
 #include <list>
 #include <sstream>
-#include <string>
+// #include <string>
 #include <vector>
 
 int verbose_mode = 0;
@@ -62,7 +62,8 @@ class RandGenerator {
     RandGenerator(const std::string& filename) {
         std::ifstream infile(filename);
         int number;
-        infile >> number;  // skip first number
+        infile >> number;  // first number is the number of random numbers
+        random_numbers.reserve(number);
         while (infile >> number) {
             random_numbers.push_back(number);
         }
@@ -79,94 +80,77 @@ struct Event {
     int clock;
     Process* p;
     process_transition transition;
-    Event* nextEvt;
 
-    Event(int clock, Process* p, process_transition transition, Event* nextEvt)
-        : clock(clock), p(p), transition(transition), nextEvt(nextEvt) {}
+    Event(int clock, Process* p, process_transition transition)
+        : clock(clock), p(p), transition(transition) {}
 };
 
 class DES {
    public:
     std::vector<Process*> process_array;
-    Event* event_queue = nullptr;
+    std::list<Event*> eventQ;
     int total_io_time = 0;
 
     DES(std::vector<Process*> process_array) {
         this->process_array = process_array;
         for (auto p : process_array) {
-            add_event(new Event(p->at, p, process_transition::CREATED_TO_READY,
-                                nullptr));
+            add_event(
+                new Event(p->at, p, process_transition::CREATED_TO_READY));
         }
     }
 
     void add_event(Event* e) {
-        if (event_queue == nullptr) {
-            event_queue = e;
+        if (eventQ.empty()) {
+            eventQ.push_back(e);
             return;
         }
 
-        Event* temp = event_queue;
-        Event* prev = nullptr;
-        while (temp != nullptr) {
-            if (temp->clock > e->clock) {
-                if (prev == nullptr) {
-                    e->nextEvt = event_queue;
-                    event_queue = e;
-                } else {
-                    e->nextEvt = temp;
-                    prev->nextEvt = e;
-                }
-                break;
+        auto it = eventQ.begin();
+        while (it != eventQ.end()) {
+            if ((*it)->clock > e->clock) {
+                eventQ.insert(it, e);
+                return;
             }
-            prev = temp;
-            temp = temp->nextEvt;
+            it++;
         }
-        if (temp == nullptr) {
-            prev->nextEvt = e;
-        }
+        eventQ.push_back(e);
     }
 
     Event next_event() {
-        Event e = *event_queue;
-        event_queue = event_queue->nextEvt;
+        Event e = *eventQ.front();
+        eventQ.pop_front();
         return e;
     }
 
     void delete_event(Process* p) {
-        Event* temp = event_queue;
-        Event* prev = nullptr;
-        while (temp != nullptr) {
-            if (temp->p == p) {
-                if (prev == nullptr) {
-                    event_queue = event_queue->nextEvt;
-                } else {
-                    prev->nextEvt = temp->nextEvt;
-                }
-                break;
+        auto it = eventQ.begin();
+        while (it != eventQ.end()) {
+            if ((*it)->p == p) {
+                eventQ.erase(it);
+                return;
             }
-            prev = temp;
-            temp = temp->nextEvt;
+            it++;
         }
     }
 
     int next_event_time() {
-        if (event_queue == nullptr) {
-            return -1;
-        }
-        return event_queue->clock;
-    }
-
-    int next_event_time_for_proc(Process* p) {
-        Event* temp = event_queue;
-        while (temp != nullptr) {
-            if (temp->p == p) {
-                return temp->clock;
-            }
-            temp = temp->nextEvt;
+        if (!eventQ.empty()) {
+            return eventQ.front()->clock;
         }
         return -1;
     }
-    bool empty() { return event_queue == nullptr; }
+
+    int next_event_time_for_proc(Process* p) {
+        auto it = eventQ.begin();
+        while (it != eventQ.end()) {
+            if ((*it)->p == p) {
+                return (*it)->clock;
+            }
+            it++;
+        }
+        return -1;
+    }
+    bool empty() { return eventQ.empty(); }
 };
 
 class Scheduler {
@@ -320,8 +304,8 @@ std::vector<Process*> create_process_array(std::string filename,
     return process_array;
 }
 
-void simulation_loop(DES* des, std::vector<Process*> process_array,
-                     Scheduler* scheduler, RandGenerator* rand_generator) {
+void simulation_loop(DES* des, Scheduler* scheduler,
+                     RandGenerator* rand_generator) {
     Process* current_running_process = NULL;
     bool call_scheduler = false;
     int cpuburst, ioburst;
@@ -330,11 +314,7 @@ void simulation_loop(DES* des, std::vector<Process*> process_array,
 
     while (!des->empty()) {
         Event e = des->next_event();
-        // std::cout << "Event: " << e.clock << " " << e.p->id << " "
-        //   << (int)e.transition << std::endl;
-
         auto time_in_state = e.clock - e.p->current_state_start_time;
-
         switch (e.transition) {
             case process_transition::CREATED_TO_READY:
                 if (verbose_mode) {
@@ -348,23 +328,15 @@ void simulation_loop(DES* des, std::vector<Process*> process_array,
                     scheduler->does_preempt()) {
                     bool cond1 = e.p->dynamic_prio >
                                  current_running_process->dynamic_prio;
-                    int next_time_for_curr_proc = -1;
-
-                    Event* temp = des->event_queue;
-                    while (temp != NULL) {
-                        if (temp->p == current_running_process) {
-                            next_time_for_curr_proc = temp->clock;
-                            break;
-                        }
-                    }
-
+                    int next_time_for_curr_proc =
+                        des->next_event_time_for_proc(current_running_process);
                     bool cond2 = next_time_for_curr_proc != e.clock;
                     if (cond1 && cond2) {
                         des->delete_event(current_running_process);
                         current_running_process->preempted = true;
-                        des->add_event(new Event(
-                            e.clock, current_running_process,
-                            process_transition::RUNNING_TO_READY, NULL));
+                        des->add_event(
+                            new Event(e.clock, current_running_process,
+                                      process_transition::RUNNING_TO_READY));
                     }
                 }
 
@@ -395,17 +367,17 @@ void simulation_loop(DES* des, std::vector<Process*> process_array,
                 if (scheduler->quantum < cpuburst) {
                     des->add_event(
                         new Event(e.clock + scheduler->quantum, e.p,
-                                  process_transition::RUNNING_TO_READY, NULL));
+                                  process_transition::RUNNING_TO_READY));
 
                 } else {
                     if (cpuburst >= e.p->remaining_time) {
-                        des->add_event(new Event(
-                            e.clock + cpuburst, e.p,
-                            process_transition::RUNNING_TO_DONE, NULL));
+                        des->add_event(
+                            new Event(e.clock + cpuburst, e.p,
+                                      process_transition::RUNNING_TO_DONE));
                     } else {
-                        des->add_event(new Event(
-                            e.clock + cpuburst, e.p,
-                            process_transition::RUNNING_TO_BLOCKED, NULL));
+                        des->add_event(
+                            new Event(e.clock + cpuburst, e.p,
+                                      process_transition::RUNNING_TO_BLOCKED));
                     }
                 }
                 break;
@@ -447,8 +419,7 @@ void simulation_loop(DES* des, std::vector<Process*> process_array,
                 e.p->current_state_start_time = e.clock;
 
                 des->add_event(new Event(e.clock + ioburst, e.p,
-                                         process_transition::BLOCKED_TO_READY,
-                                         NULL));
+                                         process_transition::BLOCKED_TO_READY));
                 call_scheduler = true;
                 break;
             case process_transition::BLOCKED_TO_READY:
@@ -478,9 +449,9 @@ void simulation_loop(DES* des, std::vector<Process*> process_array,
                     if (cond1 && cond2) {
                         des->delete_event(current_running_process);
                         current_running_process->preempted = true;
-                        des->add_event(new Event(
-                            e.clock, current_running_process,
-                            process_transition::RUNNING_TO_READY, NULL));
+                        des->add_event(
+                            new Event(e.clock, current_running_process,
+                                      process_transition::RUNNING_TO_READY));
                     }
                 }
 
@@ -507,9 +478,9 @@ void simulation_loop(DES* des, std::vector<Process*> process_array,
                 if (current_running_process == nullptr) {
                     auto proc = scheduler->get_next_process();
                     if (proc != nullptr) {
-                        des->add_event(new Event(
-                            e.clock, proc, process_transition::READY_TO_RUNNING,
-                            nullptr));
+                        des->add_event(
+                            new Event(e.clock, proc,
+                                      process_transition::READY_TO_RUNNING));
                     }
                 }
             }
@@ -625,6 +596,6 @@ int main(int argc, char** argv) {
         create_process_array(inputfile, &rand_generator, scheduler->maxprio);
     auto des = DES(process_array);
 
-    simulation_loop(&des, process_array, scheduler, &rand_generator);
+    simulation_loop(&des, scheduler, &rand_generator);
     print_summary(&des, scheduler);
 }
