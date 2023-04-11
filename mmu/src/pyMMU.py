@@ -3,9 +3,6 @@ import re
 from collections import deque
 
 
-frame_table: list[int] = [0] * 256
-
-
 class Process:
     def __init__(self):
         self.page_table: list[int] = [0] * 64
@@ -50,15 +47,18 @@ class MMU:
             return frame_idx
         else:
             frame_idx = self.pager.select_victim_frame()
-            print(f" UNMAP {self.frame_table[frame_idx].pid}:{self.frame_table[frame_idx].vpage}")
+            print(
+                f" UNMAP {self.frame_table[frame_idx].pid}:{self.frame_table[frame_idx].vpage}")
             if self.page_table[self.frame_table[frame_idx].vpage].modified:
-                print(f" OUT")# {self.frame_table[frame_idx].pid}:{self.frame_table[frame_idx].vpage}")
+                # {self.frame_table[frame_idx].pid}:{self.frame_table[frame_idx].vpage}")
+                print(f" OUT")
             return frame_idx
 
     def process_instruction(self, operation, vpage):
         if operation == 'c':
             pass
         elif operation == 'r':
+            
             if self.page_table[vpage].present:
                 pass
             else:
@@ -68,8 +68,9 @@ class MMU:
                 self.page_table[vpage].frame = frame
                 frame.pid = 0
                 frame.vpage = vpage
-                print('ZERO')
-                print(f'MAP {frame_idx}')
+                print(' ZERO')
+                print(f' MAP {frame_idx}')
+            self.page_table[vpage].referenced = True
         elif operation == 'w':
             if self.page_table[vpage].present:
                 pass
@@ -81,8 +82,9 @@ class MMU:
                 self.page_table[vpage].modified = True
                 frame.pid = 0
                 frame.vpage = vpage
-                print('ZERO')
-                print(f'MAP {frame_idx}')
+                print(' ZERO')
+                print(f' MAP {frame_idx}')
+            self.page_table[vpage].referenced = True
         else:
             raise ValueError(f'Invalid operation: {operation}')
 
@@ -139,18 +141,33 @@ def main(args):
     processes, instructions = read_input_file(args.inputfile)
     # print(processes)
     # print(instructions)
-
     mmu = MMU(args.f)
 
     for idx, (operation, address) in enumerate(instructions):
         print(f"{idx}: ==> {operation} {address}")
         mmu.process_instruction(operation, address)
-        
-    ## print end stats in this format
+
+    # print end stats in this format
     # PT[0]: 0:R-- 1:RM- * 3:R-- 4:R-- 5:RM- * * 8:R-- * * # * 13:R-- * * * * * * # 21:R-- * * 24:R-- * * * 28:RM- * 30:R-- 31:R-- * * * * * * 38:RM- * * * * * 44:R-- * * * 48:RM- * * # * * * # 56:R-- * * * * * * *
     # FT: 0:28 0:56 0:31 0:4 0:48 0:3 0:5 0:24 0:8 0:1 0:38 0:0 0:30 0:13 0:44 0:21
     # PROC[0]: U=10 M=26 I=0 O=4 FI=0 FO=0 Z=26 SV=0 SP=0
     # TOTALCOST 31 1 0 28260 4
+    print("PT[0]:", end=" ")
+    for vpage, pte in enumerate(mmu.page_table):
+        if pte.present:
+            print(f"{vpage}:{'R' if pte.referenced else '-'}{'M' if pte.modified else '-'}{'S' if pte.pagedout else '-'}", end=" ")
+        else:
+            print('*', end=" ")
+    print(" ")
+
+    print("FT:", " ".join(
+        f"{frame.pid}:{frame.vpage}" for frame in mmu.frame_table))
+    
+    # for idx, process in enumerate(processes):
+        # print(f"PROC[{idx}]: U={process['unmaps']} M={process['maps']} I={process['ins']} O={process['outs']} FI={process['fins']} FO={process['fouts']} Z={process['zeros']} SV={process['segv']} SP={process['segprot']}")
+    
+    ## inst_count, ctx_switches, process_exits, cost, sizeof(pte_t));
+    # print(f"TOTALCOST {mmu.inst_count} {mmu.ctx_switches} {mmu.process_exits} {mmu.cost} 'sizeof(pte_t)'")
 
 
 if __name__ == "__main__":
