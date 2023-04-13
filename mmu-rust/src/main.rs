@@ -64,8 +64,8 @@ impl Process {
 
 #[derive(Debug, Clone, Copy)]
 struct Frame {
-    pid: u64,
-    vpage: u64,
+    pid: Option<u64>,
+    vpage: Option<u64>,
 }
 
 struct Pager {
@@ -84,32 +84,35 @@ impl Pager {
     }
 }
 
-// TODO: use fixed lenght arrays instead of Vec
 struct MMU {
     frame_table: Vec<Frame>,
-    free_frames: Vec<u64>,
+    free_frames: Vec<usize>,
     page_table: PageTable,
     pager: Pager,
 }
 
 impl MMU {
-    // fn new(max_frames: usize, processes: Vec<Process>) -> MMU {
-    //     // create a fixed size frame table of size max_frames
-    //     // let mut frame_table = [Frame; 64];
+    fn new(max_frames: usize, processes: Vec<Process>) -> MMU {
+        // create a fixed size frame table of size max_frames
+        let mut frame_table = Vec::new();
+        let mut free_frames = Vec::new();
+        for i in 0..max_frames {
+            frame_table.push(Frame {
+                pid: None,
+                vpage: None,
+            });
+            free_frames.push(i);
+        }
 
-    //     // let mut free_frames = Vec::new();
-    //     // for i in 0..64 {
-    //     //     // frame_table.push(Frame { pid: 0, vpage: 0 });
-    //     //     free_frames.push(i);
-    //     // }
-
-    //     MMU {
-    //         frame_table: frame_table,
-    //         free_frames: free_frames,
-    //         page_table: PageTable { entries: Vec::new() },
-    //         pager: Pager::new(),
-    //     }
-    // }
+        MMU {
+            frame_table: frame_table,
+            free_frames: free_frames,
+            page_table: PageTable {
+                entries: Vec::new(),
+            },
+            pager: Pager::new(),
+        }
+    }
 }
 
 fn read_input_file(filename: &str) -> (Vec<Process>, Vec<(String, u32)>) {
@@ -193,7 +196,7 @@ fn actual_main_fn(num_frames: usize, algorithm: &str, inputfile: &str, randomfil
     let (processes, instructions) = read_input_file(inputfile);
 
     // Create a new MMU and process instructions
-    // let mut mmu = MMU::new(16, processes);
+    let mut mmu = MMU::new(16, processes);
     for (idx, (operation, address)) in instructions.iter().enumerate() {
         println!("{}: ==> {} {}", idx, operation, address);
         // mmu.process_instruction(operation, address);
@@ -249,7 +252,7 @@ fn main() {
         .parse()
         .expect("Failed to parse number of frames");
     let algorithm = matches.value_of("algorithm").unwrap();
-    let options = matches.value_of("options").unwrap();
+    // let options = matches.value_of("options").unwrap();
     let inputfile = matches.value_of("inputfile").unwrap();
     let randomfile = matches.value_of("randomfile").unwrap();
 
