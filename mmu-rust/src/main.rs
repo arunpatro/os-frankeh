@@ -276,7 +276,7 @@ fn actual_main_fn(num_frames: usize, algorithm: String, inputfile: String, rando
     let (processes, instructions) = read_input_file(&inputfile);
 
     // Create a new MMU and process instructions
-    let mut mmu = MMU::new(16, processes);
+    let mut mmu = MMU::new(num_frames, processes);
     for (idx, (operation, address)) in instructions.iter().cloned().enumerate() {
         println!("{}: ==> {} {}", idx, operation, address);
         mmu.process_instruction(&operation, address);
