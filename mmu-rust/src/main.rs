@@ -283,11 +283,6 @@ fn actual_main_fn(num_frames: usize, algorithm: String, inputfile: String, rando
     }
 
     // Print end stats
-    // example output:
-    // PT[0]: 0:R-- 1:RM- * 3:R-- 4:R-- 5:RM- * * 8:R-- * * # * 13:R-- * * * * * * # 21:R-- * * 24:R-- * * * 28:RM- * 30:R-- 31:R-- * * * * * * 38:RM- * * * * * 44:R-- * * * 48:RM- * * # * * * # 56:R-- * * * * * * *
-    // FT: 0:28 0:56 0:31 0:4 0:48 0:3 0:5 0:24 0:8 0:1 0:38 0:0 0:30 0:13 0:44 0:21
-    // PROC[0]: U=10 M=26 I=0 O=4 FI=0 FO=0 Z=26 SV=0 SP=0
-    // TOTALCOST 31 1 0 28260 4
     // 1. print page table of each process
     for (idx, process) in mmu.processes.iter().enumerate() {
         print!("PT[{}]:", idx);
