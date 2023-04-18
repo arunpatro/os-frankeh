@@ -22,12 +22,14 @@ impl VMA {
 }
 
 struct PTE {
+    frame: Option<usize>,
     present: bool,
-    modified: bool,
     referenced: bool,
+    modified: bool,
     write_protected: bool,
     paged_out: bool,
-    frame: Option<usize>,
+    file_mapped: bool,
+    is_valid_vma: bool,
 }
 
 struct PageTable {
@@ -59,13 +61,16 @@ impl Process {
                 .iter()
                 .find(|vma| vma.start <= vpage && vpage <= vma.end);
             let write_protected = vma.map_or(false, |vma| vma.write_protected);
+            let file_mapped = vma.map_or(false, |vma| vma.file_mapped);
             entries.push(PTE {
+                frame: None,
                 present: false,
-                modified: false,
                 referenced: false,
+                modified: false,
                 write_protected: write_protected,
                 paged_out: false,
-                frame: None,
+                file_mapped: file_mapped,
+                is_valid_vma: vma.is_some(),
             });
         }
 
@@ -165,20 +170,13 @@ impl MMU {
             // update the process stats
             self.processes[pid as usize].unmaps += 1;
 
-            let page_file_mapped = self.processes[pid as usize]
-                .vmas
-                .iter()
-                .find(|vma| vma.start <= vpage && vpage <= vma.end)
-                .unwrap()
-                .file_mapped;
-
             let page = &mut self.processes[pid as usize].page_table.entries[vpage];
             // no longer present
             page.present = false;
             if page.modified {
                 page.modified = false;
                 // check if it is file mapped for OUT or FOUT
-                if page_file_mapped {
+                if page.file_mapped {
                     println!(" FOUT");
                     self.processes[pid as usize].fouts += 1;
                 } else {
@@ -191,6 +189,23 @@ impl MMU {
         }
 
         frame
+    }
+
+    fn page_fault_handler(&mut self, vpage: usize) {
+        // TODO
+        // 1. check if page can be accessed i.e. it is in the vma, if not then segv and move on
+        {
+            let proc = &mut self.processes[self.current_process.unwrap()];
+            let vma = proc
+                .vmas
+                .iter()
+                .find(|vma| vma.start <= vpage && vpage <= vma.end);
+            if vma.is_none() {
+                println!(" SEGV");
+                proc.segv += 1;
+                return;
+            }
+        }
     }
 
     fn process_instruction(&mut self, operation: &str, argument: usize) {
@@ -208,6 +223,7 @@ impl MMU {
                     .present
                 {
                     // TODO page fault so call the page fault handler
+                    // self.page_fault_handler(vpage);
 
                     // 1. check if page can be accessed i.e. it is in the vma, if not then segv and move on
                     {
@@ -238,15 +254,7 @@ impl MMU {
                     //    or "FIN" if it is memory mapped ?? what is this?
                     //    else zero it
 
-                    // check if page is file mapped from the vma
-                    let page_file_mapped = proc
-                        .vmas
-                        .iter()
-                        .find(|vma| vma.start <= vpage && vpage <= vma.end)
-                        .unwrap()
-                        .file_mapped;
-
-                    if page_file_mapped {
+                    if page.file_mapped {
                         println!(" FIN");
                         proc.fins += 1;
                     } else if page.paged_out {
@@ -260,59 +268,52 @@ impl MMU {
                     proc.maps += 1;
 
                     page.referenced = true;
-                    
-                    // 2. check if page is writeable if not then segprot and move on
-                    if operation == "w" && page.write_protected {
-                        println!(" SEGPROT");
-                        proc.segprot += 1;
-                        return;
-                    }
-
-                    if operation == "w" {
-                        page.modified = true;
-                    }
                 }
 
                 // finally update the reference and modified bits
-                {
-                    let page_table = &mut self.processes[self.current_process.unwrap()].page_table;
-                    if page_table.entries[vpage].present {
-                        if operation == "w" {
-                            page_table.entries[vpage].modified = true;
+                if let Some(current_process) = self.current_process {
+                    let proc = &mut self.processes[current_process];
+                    let page = &mut proc.page_table.entries[vpage];
+                    page.referenced = true;
+
+                    if operation == "w" {
+                        if page.write_protected {
+                            println!(" SEGPROT");
+                            proc.segprot += 1;
+                            return;
+                        } else {
+                            page.modified = true;
                         }
-                        page_table.entries[vpage].referenced = true;
                     }
                 }
             }
             "e" => {
                 let pid = argument;
+                println!("EXIT current process {}", pid);
                 self.process_exits += 1;
                 let proc = &mut self.processes[pid];
                 for vpage in 0..64 {
-                    if proc.page_table.entries[vpage].present {
-                        let frame_idx = proc.page_table.entries[vpage].frame.unwrap();
+                    let page = &mut proc.page_table.entries[vpage];
+                    page.paged_out = false; // reset paged out bit
+                    if page.present {
+                        let frame_idx = page.frame.unwrap();
                         let frame = &mut self.frame_table[frame_idx];
                         frame.pid = None;
                         frame.vpage = None;
                         self.free_frames.push_back(frame_idx);
-                        proc.page_table.entries[vpage].present = false;
-                        proc.page_table.entries[vpage].frame = None;
+                        page.present = false;
+                        page.frame = None;
                         println!(" UNMAP {}:{}", pid, vpage);
                         proc.unmaps += 1;
-                        if proc.page_table.entries[vpage].modified {
-                            // check if it is file mapped
-                            let page_file_mapped = proc
-                                .vmas
-                                .iter()
-                                .find(|vma| vma.start <= vpage && vpage <= vma.end)
-                                .unwrap()
-                                .file_mapped;
-                            if page_file_mapped {
+
+                        // all the below code is not required i think
+                        if page.modified {
+                            if page.file_mapped {
                                 println!(" FOUT");
                                 proc.fouts += 1;
                             } else {
-                                println!(" OUT");
-                                proc.outs += 1;
+                                // println!(" OUT");
+                                // proc.outs += 1;
                             }
                         }
                     }
@@ -415,15 +416,15 @@ fn actual_main_fn(num_frames: usize, algorithm: String, inputfile: String, rando
     for (idx, process) in mmu.processes.iter().enumerate() {
         print!("PT[{}]:", idx);
         for (idx, entry) in process.page_table.entries.iter().enumerate() {
-            if entry.present {
+            if entry.paged_out && !entry.present && !entry.file_mapped {
+                print!(" #");
+            } else if !entry.is_valid_vma || !entry.present {
+                print!(" *");
+            } else {
                 print!(" {}:", idx);
                 print!("{}", if entry.referenced { 'R' } else { '-' });
                 print!("{}", if entry.modified { 'M' } else { '-' });
                 print!("{}", if entry.paged_out { 'S' } else { '-' });
-            } else if entry.paged_out {
-                print!(" #");
-            } else {
-                print!(" *");
             }
         }
         println!();
@@ -545,7 +546,7 @@ fn get_default_args() -> Vec<String> {
         "mmu-rust".to_string(),
         "-f16".to_string(),
         "-aF".to_string(),
-        "../mmu/lab3_assign/in5".to_string(),
+        "../mmu/lab3_assign/in10".to_string(),
         "../mmu/lab3_assign/rfile".to_string(),
     ]
 }
