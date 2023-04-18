@@ -98,30 +98,59 @@ struct Frame {
     vpage: Option<usize>,
 }
 
-struct Pager {
+trait Pager {
+    fn select_victim_frame(&mut self) -> usize;
+}
+
+struct FIFO {
     hand: usize,
     num_frames: usize,
 }
-
-impl Pager {
-    fn new(num_frames: usize) -> Pager {
-        Pager {
+impl FIFO {
+    fn new(num_frames: usize) -> FIFO {
+        FIFO {
             hand: 0,
             num_frames: num_frames,
         }
     }
-
+}
+    
+impl Pager for FIFO {
     fn select_victim_frame(&mut self) -> usize {
-        let hand = self.hand;
+        let frame = self.hand;
         self.hand = (self.hand + 1) % self.num_frames;
-        hand
+        frame
+    }
+}
+
+struct Random {
+    hand: usize,
+    num_frames: usize,
+    random_numbers: Vec<usize>,
+}
+
+impl Random {
+    fn new(num_frames: usize, random_numbers: Vec<usize>) -> Random {
+        Random {
+            hand: 0,
+            num_frames: num_frames,
+            random_numbers: random_numbers,
+        }
+    }
+}
+
+impl Pager for Random {
+    fn select_victim_frame(&mut self) -> usize {
+        let frame = self.random_numbers[self.hand] % self.num_frames;
+        self.hand = (self.hand + 1) % self.random_numbers.len();
+        frame
     }
 }
 
 struct MMU {
     frame_table: Vec<Frame>,
     free_frames: VecDeque<usize>,
-    pager: Pager,
+    pager: Box<dyn Pager>,
     processes: Vec<Process>,
     current_process: Option<usize>,
 
@@ -132,7 +161,7 @@ struct MMU {
 }
 
 impl MMU {
-    fn new(max_frames: usize, processes: Vec<Process>) -> MMU {
+    fn new(max_frames: usize, pager: Box<dyn Pager>, processes: Vec<Process>) -> MMU {
         // create a fixed size frame table of size max_frames
         let mut frame_table = vec![
             Frame {
@@ -149,7 +178,7 @@ impl MMU {
         MMU {
             frame_table: frame_table,
             free_frames: free_frames,
-            pager: Pager::new(max_frames),
+            pager: pager,
             processes: processes,
             current_process: None,
             ctx_switches: 0,
@@ -192,20 +221,6 @@ impl MMU {
     }
 
     fn page_fault_handler(&mut self, vpage: usize) {
-        // TODO
-        // 1. check if page can be accessed i.e. it is in the vma, if not then segv and move on
-        {
-            let proc = &mut self.processes[self.current_process.unwrap()];
-            let vma = proc
-                .vmas
-                .iter()
-                .find(|vma| vma.start <= vpage && vpage <= vma.end);
-            if vma.is_none() {
-                println!(" SEGV");
-                proc.segv += 1;
-                return;
-            }
-        }
     }
 
     fn process_instruction(&mut self, operation: &str, argument: usize) {
@@ -323,6 +338,32 @@ impl MMU {
         }
     }
 }
+fn read_random_file(filename: &str) -> Vec<usize> {
+    // The format is: the 1st line is the number of random numbers, and the rest are the numbers
+    let file = File::open(filename).expect("Failed to open file");
+    let reader = BufReader::new(file);
+
+    let mut lines = reader.lines();
+    let count: usize = lines
+        .next()
+        .expect("Failed to read the first line")
+        .expect("Failed to read the first line")
+        .trim()
+        .parse()
+        .expect("Failed to parse the number of random numbers");
+
+    let mut random_numbers = Vec::with_capacity(count);
+    for line in lines {
+        let number: usize = line
+            .expect("Failed to read a line")
+            .trim()
+            .parse()
+            .expect("Failed to parse a random number");
+        random_numbers.push(number);
+    }
+
+    random_numbers
+}
 
 fn read_input_file(filename: &str) -> (Vec<Process>, Vec<(String, usize)>) {
     let file = File::open(filename).expect("Failed to open file");
@@ -400,12 +441,25 @@ fn read_input_file(filename: &str) -> (Vec<Process>, Vec<(String, usize)>) {
 
     (processes, instructions)
 }
-fn actual_main_fn(num_frames: usize, algorithm: String, inputfile: String, randomfile: String) {
+fn actual_main_fn(num_frames: usize, algorithm: &str, inputfile: &str, randomfile: &str) {
     // Read input file
     let (processes, instructions) = read_input_file(&inputfile);
 
-    // Create a new MMU and process instructions
-    let mut mmu = MMU::new(num_frames, processes);
+    // Create a new MMU and a pager based on the algorithm and process instructions
+    let pager = match (algorithm) {
+        "f" => Box::new(FIFO::new(num_frames)) as Box<dyn Pager>,
+        "r" => {
+            let random_numbers = read_random_file(&randomfile);
+            // println!("Random numbers: {:?}", random_numbers);
+            Box::new(Random::new(num_frames, random_numbers))
+        }
+        // "c" => Pager::Clock,
+        // "e" => Pager::NRU,
+        // "a" => Pager::Aging,
+        _ => panic!("Invalid algorithm: {}", algorithm),
+    };
+
+    let mut mmu = MMU::new(num_frames, pager, processes);
     for (idx, (operation, address)) in instructions.iter().cloned().enumerate() {
         println!("{}: ==> {} {}", idx, operation, address);
         mmu.process_instruction(&operation, address);
@@ -545,8 +599,8 @@ fn get_default_args() -> Vec<String> {
     vec![
         "mmu-rust".to_string(),
         "-f16".to_string(),
-        "-aF".to_string(),
-        "../mmu/lab3_assign/in10".to_string(),
+        "-ar".to_string(),
+        "../mmu/lab3_assign/in1".to_string(),
         "../mmu/lab3_assign/rfile".to_string(),
     ]
 }
@@ -571,5 +625,5 @@ fn main() {
     // println!("ARG inputfile: {}", inputfile);
     // println!("ARG randomfile: {}", randomfile);
     // Call your main function with the parsed arguments
-    actual_main_fn(num_frames, algorithm, inputfile, randomfile);
+    actual_main_fn(num_frames, &algorithm, &inputfile, &randomfile);
 }
