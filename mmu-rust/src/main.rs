@@ -165,16 +165,28 @@ impl MMU {
             // update the process stats
             self.processes[pid as usize].unmaps += 1;
 
+            let page_file_mapped = self.processes[pid as usize]
+                .vmas
+                .iter()
+                .find(|vma| vma.start <= vpage && vpage <= vma.end)
+                .unwrap()
+                .file_mapped;
+
             let page = &mut self.processes[pid as usize].page_table.entries[vpage];
             // no longer present
             page.present = false;
             if page.modified {
-                // check if it is file mapped for OUT or FOUT
-                // it means modified bit is set and is getting paged out
-                page.paged_out = true;
                 page.modified = false;
-                println!(" OUT");
-                self.processes[pid as usize].outs += 1;
+                // check if it is file mapped for OUT or FOUT
+                if page_file_mapped {
+                    println!(" FOUT");
+                    self.processes[pid as usize].fouts += 1;
+                } else {
+                    // it means modified bit is set and is getting paged out
+                    page.paged_out = true;
+                    println!(" OUT");
+                    self.processes[pid as usize].outs += 1;
+                }
             }
         }
 
@@ -240,8 +252,7 @@ impl MMU {
                     } else if page.paged_out {
                         println!(" IN");
                         proc.ins += 1;
-                    }
-                    else {
+                    } else {
                         println!(" ZERO");
                         proc.zeros += 1;
                     }
