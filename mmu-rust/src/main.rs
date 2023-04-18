@@ -259,6 +259,8 @@ impl MMU {
                     println!(" MAP {}", frame_idx);
                     proc.maps += 1;
 
+                    page.referenced = true;
+                    
                     // 2. check if page is writeable if not then segprot and move on
                     if operation == "w" && page.write_protected {
                         println!(" SEGPROT");
@@ -269,7 +271,6 @@ impl MMU {
                     if operation == "w" {
                         page.modified = true;
                     }
-                    page.referenced = true;
                 }
 
                 // finally update the reference and modified bits
