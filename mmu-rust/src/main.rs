@@ -2,12 +2,31 @@ use clap::{App, Arg};
 use std::collections::VecDeque;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
-struct VMA {}
+
+#[derive(Debug)]
+struct VMA {
+    start: usize,
+    end: usize,
+    write_protected: bool,
+    file_mapped: bool,
+}
+impl VMA {
+    fn new(start: usize, end: usize, write_protected: bool, file_mapped: bool) -> VMA {
+        VMA {
+            start: start,
+            end: end,
+            write_protected: write_protected,
+            file_mapped: file_mapped,
+        }
+    }
+}
 
 struct PTE {
     present: bool,
     modified: bool,
     referenced: bool,
+    write_protected: bool,
+    paged_out: bool,
     frame: Option<usize>,
 }
 
@@ -31,14 +50,21 @@ struct Process {
     segprot: u64,
 }
 impl Process {
-    fn new(num_vmas: usize, vmas: Vec<(u32, u32, u32, u32)>) -> Process {
+    fn new(vmas: Vec<VMA>) -> Process {
         let mut entries = Vec::with_capacity(64);
 
-        for _ in 0..64 {
+        // initialize all the page table entries to not present, and set write_protected if the vma is write protected
+        for vpage in 0..64 {
+            let vma = vmas
+                .iter()
+                .find(|vma| vma.start <= vpage && vpage <= vma.end);
+            let write_protected = vma.map_or(false, |vma| vma.write_protected);
             entries.push(PTE {
                 present: false,
                 modified: false,
                 referenced: false,
+                write_protected: write_protected,
+                paged_out: false,
                 frame: None,
             });
         }
@@ -46,7 +72,7 @@ impl Process {
         let page_table = PageTable { entries };
 
         Process {
-            vmas: Vec::new(),
+            vmas: vmas,
             page_table: page_table,
             unmaps: 0,
             maps: 0,
@@ -69,16 +95,20 @@ struct Frame {
 
 struct Pager {
     hand: usize,
+    num_frames: usize,
 }
 
 impl Pager {
-    fn new() -> Pager {
-        Pager { hand: 0 }
+    fn new(num_frames: usize) -> Pager {
+        Pager {
+            hand: 0,
+            num_frames: num_frames,
+        }
     }
 
     fn select_victim_frame(&mut self) -> usize {
         let hand = self.hand;
-        self.hand = (self.hand + 1) % 64;
+        self.hand = (self.hand + 1) % self.num_frames;
         hand
     }
 }
@@ -114,7 +144,7 @@ impl MMU {
         MMU {
             frame_table: frame_table,
             free_frames: free_frames,
-            pager: Pager::new(),
+            pager: Pager::new(max_frames),
             processes: processes,
             current_process: None,
             ctx_switches: 0,
@@ -135,11 +165,14 @@ impl MMU {
             // update the process stats
             self.processes[pid as usize].unmaps += 1;
 
-            let page_table = &mut self.processes[pid as usize].page_table;
+            let page = &mut self.processes[pid as usize].page_table.entries[vpage];
             // no longer present
-            page_table.entries[vpage].present = false;
-            if page_table.entries[vpage].modified {
+            page.present = false;
+            if page.modified {
+                // check if it is file mapped for OUT or FOUT
                 // it means modified bit is set and is getting paged out
+                page.paged_out = true;
+                page.modified = false;
                 println!(" OUT");
                 self.processes[pid as usize].outs += 1;
             }
@@ -157,6 +190,78 @@ impl MMU {
             }
             "r" | "w" => {
                 let vpage = argument;
+                if !self.processes[self.current_process.unwrap()]
+                    .page_table
+                    .entries[vpage]
+                    .present
+                {
+                    // TODO page fault so call the page fault handler
+
+                    // 1. check if page can be accessed i.e. it is in the vma, if not then segv and move on
+                    {
+                        let proc = &mut self.processes[self.current_process.unwrap()];
+                        let vma = proc
+                            .vmas
+                            .iter()
+                            .find(|vma| vma.start <= vpage && vpage <= vma.end);
+                        if vma.is_none() {
+                            println!(" SEGV");
+                            proc.segv += 1;
+                            return;
+                        }
+                    }
+
+                    // 3. if valid then assign a frame
+                    let frame_idx = self.get_frame();
+                    let frame = &mut self.frame_table[frame_idx];
+                    let proc = &mut self.processes[self.current_process.unwrap()];
+                    let page = &mut proc.page_table.entries[vpage];
+                    page.present = true;
+                    page.frame = Some(frame_idx);
+                    frame.pid = Some(self.current_process.unwrap() as u64);
+                    frame.vpage = Some(vpage);
+
+                    // 4. populate it -
+                    //    if paged out then we need bring it "IN" from swap space
+                    //    or "FIN" if it is memory mapped ?? what is this?
+                    //    else zero it
+
+                    // check if page is file mapped from the vma
+                    let page_file_mapped = proc
+                        .vmas
+                        .iter()
+                        .find(|vma| vma.start <= vpage && vpage <= vma.end)
+                        .unwrap()
+                        .file_mapped;
+
+                    if page_file_mapped {
+                        println!(" FIN");
+                        proc.fins += 1;
+                    } else if page.paged_out {
+                        println!(" IN");
+                        proc.ins += 1;
+                    }
+                    else {
+                        println!(" ZERO");
+                        proc.zeros += 1;
+                    }
+                    println!(" MAP {}", frame_idx);
+                    proc.maps += 1;
+
+                    // 2. check if page is writeable if not then segprot and move on
+                    if operation == "w" && page.write_protected {
+                        println!(" SEGPROT");
+                        proc.segprot += 1;
+                        return;
+                    }
+
+                    if operation == "w" {
+                        page.modified = true;
+                    }
+                    page.referenced = true;
+                }
+
+                // finally update the reference and modified bits
                 {
                     let page_table = &mut self.processes[self.current_process.unwrap()].page_table;
                     if page_table.entries[vpage].present {
@@ -166,28 +271,39 @@ impl MMU {
                         page_table.entries[vpage].referenced = true;
                     }
                 }
-                if !self.processes[self.current_process.unwrap()]
-                    .page_table
-                    .entries[vpage]
-                    .present
-                {
-                    let frame_idx = self.get_frame();
-                    let frame = &mut self.frame_table[frame_idx];
-                    let page_table = &mut self.processes[self.current_process.unwrap()].page_table;
-                    page_table.entries[vpage].present = true;
-                    page_table.entries[vpage].frame = Some(frame_idx);
-                    frame.pid = Some(0);
-                    frame.vpage = Some(vpage);
-
-                    if operation == "w" {
-                        page_table.entries[vpage].modified = true;
+            }
+            "e" => {
+                let pid = argument;
+                self.process_exits += 1;
+                let proc = &mut self.processes[pid];
+                for vpage in 0..64 {
+                    if proc.page_table.entries[vpage].present {
+                        let frame_idx = proc.page_table.entries[vpage].frame.unwrap();
+                        let frame = &mut self.frame_table[frame_idx];
+                        frame.pid = None;
+                        frame.vpage = None;
+                        self.free_frames.push_back(frame_idx);
+                        proc.page_table.entries[vpage].present = false;
+                        proc.page_table.entries[vpage].frame = None;
+                        println!(" UNMAP {}:{}", pid, vpage);
+                        proc.unmaps += 1;
+                        if proc.page_table.entries[vpage].modified {
+                            // check if it is file mapped
+                            let page_file_mapped = proc
+                                .vmas
+                                .iter()
+                                .find(|vma| vma.start <= vpage && vpage <= vma.end)
+                                .unwrap()
+                                .file_mapped;
+                            if page_file_mapped {
+                                println!(" FOUT");
+                                proc.fouts += 1;
+                            } else {
+                                println!(" OUT");
+                                proc.outs += 1;
+                            }
+                        }
                     }
-                    page_table.entries[vpage].referenced = true;
-
-                    println!(" ZERO");
-                    println!(" MAP {}", frame_idx);
-                    self.processes[self.current_process.unwrap()].maps += 1;
-                    self.processes[self.current_process.unwrap()].zeros += 1;
                 }
             }
             _ => panic!("Invalid operation: {}", operation),
@@ -234,18 +350,18 @@ fn read_input_file(filename: &str) -> (Vec<Process>, Vec<(String, usize)>) {
             let mut iter = line
                 .trim()
                 .split_whitespace()
-                .map(|x| x.parse::<u32>().expect("Failed to parse number"));
+                .map(|x| x.parse::<usize>().expect("Failed to parse number"));
             let start = iter.next().unwrap();
             let end = iter.next().unwrap();
-            let wprot = iter.next().unwrap();
-            let mmap = iter.next().unwrap();
+            let wprot = iter.next().unwrap() == 1;
+            let mmap = iter.next().unwrap() == 1;
 
-            vmas.push((start, end, wprot, mmap));
+            vmas.push(VMA::new(start, end, wprot, mmap));
             line.clear();
         }
 
         // Create a new Process with the VMAs and add it to the processes list
-        processes.push(Process::new(num_vmas, vmas));
+        processes.push(Process::new(vmas));
     }
 
     // Skip comment lines
@@ -291,9 +407,8 @@ fn actual_main_fn(num_frames: usize, algorithm: String, inputfile: String, rando
                 print!(" {}:", idx);
                 print!("{}", if entry.referenced { 'R' } else { '-' });
                 print!("{}", if entry.modified { 'M' } else { '-' });
-                print!("-");
-                // print!("{}", if entry.pagedout { 'S' } else { '-' });
-            } else if entry.modified {
+                print!("{}", if entry.paged_out { 'S' } else { '-' });
+            } else if entry.paged_out {
                 print!(" #");
             } else {
                 print!(" *");
@@ -336,25 +451,28 @@ fn actual_main_fn(num_frames: usize, algorithm: String, inputfile: String, rando
     // 4. total stats
     // calc cost
     let mut cost = 0;
-    for (idx, process) in mmu.processes.iter().enumerate() {
+    for process in mmu.processes.iter() {
         cost += process.unmaps * 410;
         cost += process.maps * 350;
-        // cost += process.ins * 3200;
+        cost += process.ins * 3200;
         cost += process.outs * 2750;
-        // cost += process.fins * 2500;
-        // cost += process.fouts * 2500;
+        cost += process.fins * 2350;
+        cost += process.fouts * 2800;
         cost += process.zeros * 150;
-        // cost += process.segv * 240;
-        // cost += process.segprot * 300;
+        cost += process.segv * 440;
+        cost += process.segprot * 410;
     }
     cost += mmu.ctx_switches * 130;
-    // cost += mmu.process_exits * 1230;
+    cost += mmu.process_exits * 1230;
     cost += (instructions.len() as u64 - mmu.process_exits - mmu.ctx_switches) * 1;
 
     println!(
         "TOTALCOST {} {} {} {} {}",
-        instructions.len(), mmu.ctx_switches, mmu.process_exits, cost, 4
-        // instructions.len(), mmu.ctx_switches, mmu.process_exits, cost, std::mem::size_of::<PTE>()
+        instructions.len(),
+        mmu.ctx_switches,
+        mmu.process_exits,
+        cost,
+        4 // instructions.len(), mmu.ctx_switches, mmu.process_exits, cost, std::mem::size_of::<PTE>()
     );
 }
 
@@ -415,8 +533,8 @@ fn get_default_args() -> Vec<String> {
         "mmu-rust".to_string(),
         "-f16".to_string(),
         "-aF".to_string(),
-        "mmu/lab3_assign/in1".to_string(),
-        "mmu/lab3_assign/rfile".to_string(),
+        "../mmu/lab3_assign/in5".to_string(),
+        "../mmu/lab3_assign/rfile".to_string(),
     ]
 }
 
