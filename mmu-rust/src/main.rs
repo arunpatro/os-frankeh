@@ -1,7 +1,9 @@
 use clap::{App, Arg};
+use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
+use std::rc::Rc;
 
 #[derive(Debug)]
 struct VMA {
@@ -114,7 +116,7 @@ impl FIFO {
         }
     }
 }
-    
+
 impl Pager for FIFO {
     fn select_victim_frame(&mut self) -> usize {
         let frame = self.hand;
@@ -148,7 +150,7 @@ impl Pager for Random {
 }
 
 struct MMU {
-    frame_table: Vec<Frame>,
+    frame_table: Rc<RefCell<Vec<Frame>>>,
     free_frames: VecDeque<usize>,
     pager: Box<dyn Pager>,
     processes: Vec<Process>,
@@ -163,13 +165,14 @@ struct MMU {
 impl MMU {
     fn new(max_frames: usize, pager: Box<dyn Pager>, processes: Vec<Process>) -> MMU {
         // create a fixed size frame table of size max_frames
-        let mut frame_table = vec![
+        let frame_table = Rc::new(RefCell::new(vec![
             Frame {
                 pid: None,
-                vpage: None
+                vpage: None,
             };
             max_frames
-        ];
+        ]));
+
         let mut free_frames = VecDeque::new();
         for i in 0..max_frames {
             free_frames.push_back(i);
@@ -192,9 +195,9 @@ impl MMU {
             return frame;
         }
 
-        let frame = self.pager.select_victim_frame();
-        let frame_entry = &self.frame_table[frame];
-        if let (Some(pid), Some(vpage)) = (frame_entry.pid, frame_entry.vpage) {
+        let frame_idx = self.pager.select_victim_frame();
+        let frame = self.frame_table.borrow()[frame_idx];
+        if let (Some(pid), Some(vpage)) = (frame.pid, frame.vpage) {
             println!(" UNMAP {}:{}", pid, vpage);
             // update the process stats
             self.processes[pid as usize].unmaps += 1;
@@ -217,11 +220,10 @@ impl MMU {
             }
         }
 
-        frame
+        frame_idx
     }
 
-    fn page_fault_handler(&mut self, vpage: usize) {
-    }
+    fn page_fault_handler(&mut self, vpage: usize) {}
 
     fn process_instruction(&mut self, operation: &str, argument: usize) {
         match operation {
@@ -256,7 +258,7 @@ impl MMU {
 
                     // 3. if valid then assign a frame
                     let frame_idx = self.get_frame();
-                    let frame = &mut self.frame_table[frame_idx];
+                    let frame = &mut self.frame_table.borrow_mut()[frame_idx];
                     let proc = &mut self.processes[self.current_process.unwrap()];
                     let page = &mut proc.page_table.entries[vpage];
                     page.present = true;
@@ -312,7 +314,7 @@ impl MMU {
                     page.paged_out = false; // reset paged out bit
                     if page.present {
                         let frame_idx = page.frame.unwrap();
-                        let frame = &mut self.frame_table[frame_idx];
+                        let frame = &mut self.frame_table.borrow_mut()[frame_idx];
                         frame.pid = None;
                         frame.vpage = None;
                         self.free_frames.push_back(frame_idx);
@@ -446,7 +448,7 @@ fn actual_main_fn(num_frames: usize, algorithm: &str, inputfile: &str, randomfil
     let (processes, instructions) = read_input_file(&inputfile);
 
     // Create a new MMU and a pager based on the algorithm and process instructions
-    let pager = match (algorithm) {
+    let pager = match algorithm {
         "f" => Box::new(FIFO::new(num_frames)) as Box<dyn Pager>,
         "r" => {
             let random_numbers = read_random_file(&randomfile);
@@ -486,7 +488,8 @@ fn actual_main_fn(num_frames: usize, algorithm: &str, inputfile: &str, randomfil
 
     // 2. print frame table
     print!("FT:");
-    for (_, frame) in mmu.frame_table.iter().enumerate() {
+    let frame_table = mmu.frame_table.as_ref().borrow();
+    for frame in frame_table.iter() {
         match (frame.pid, frame.vpage) {
             (Some(pid), Some(vpage)) => {
                 print!(" {}:{}", pid, vpage);
