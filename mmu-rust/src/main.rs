@@ -45,7 +45,9 @@ macro_rules! F_trace {
 }
 
 macro_rules! a_trace {
-    () => {};
+    ($($arg:tt)*) => {
+        println!($($arg)*);
+    };
 }
 
 #[derive(Debug)]
@@ -820,9 +822,9 @@ fn get_default_args() -> Vec<String> {
     vec![
         "mmu-rust".to_string(),
         "-f16".to_string(),
-        "-af".to_string(),
+        "-ac".to_string(),
         "-oOPFS".to_string(),
-        "../mmu/lab3_assign/in1".to_string(),
+        "../mmu/lab3_assign/in4".to_string(),
         "../mmu/lab3_assign/rfile".to_string(),
     ]
 }
