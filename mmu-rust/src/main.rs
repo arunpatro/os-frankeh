@@ -253,7 +253,7 @@ impl Pager for Clock {
                 page.referenced = false;
                 frame_idx += 1;
             } else {
-                // print!("ASELECT {} {}", old_hand, frame_idx - old_hand + 1); // need to wrap this in a trace which depends of the a_trace flag
+                a_trace!("ASELECT {} {}", old_hand, frame_idx - old_hand + 1);
                 self.hand = frame_idx % self.num_frames + 1;
                 return frame_idx % self.num_frames;
             }
