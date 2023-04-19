@@ -96,8 +96,8 @@ impl Process {
 
 #[derive(Debug, Clone, Copy)]
 struct Frame {
-    pid: Option<u64>,
-    vpage: Option<usize>,
+    pid: u64,
+    vpage: usize,
 }
 
 trait Pager {
@@ -105,14 +105,14 @@ trait Pager {
 }
 
 struct FIFO {
-    frame_table: Rc<RefCell<Vec<Frame>>>,
+    frame_table: Rc<RefCell<Vec<Option<Frame>>>>,
     free_frames: Rc<RefCell<VecDeque<usize>>>,
     hand: usize,
     num_frames: usize,
 }
 impl FIFO {
     fn new(
-        frame_table: Rc<RefCell<Vec<Frame>>>,
+        frame_table: Rc<RefCell<Vec<Option<Frame>>>>,
         free_frames: Rc<RefCell<VecDeque<usize>>>,
     ) -> FIFO {
         let num_frames = frame_table.borrow().len();
@@ -134,7 +134,7 @@ impl Pager for FIFO {
 }
 
 struct Random {
-    frame_table: Rc<RefCell<Vec<Frame>>>,
+    frame_table: Rc<RefCell<Vec<Option<Frame>>>>,
     free_frames: Rc<RefCell<VecDeque<usize>>>,
     hand: usize,
     num_frames: usize,
@@ -143,7 +143,7 @@ struct Random {
 
 impl Random {
     fn new(
-        frame_table: Rc<RefCell<Vec<Frame>>>,
+        frame_table: Rc<RefCell<Vec<Option<Frame>>>>,
         free_frames: Rc<RefCell<VecDeque<usize>>>,
         random_numbers: Vec<usize>,
     ) -> Random {
@@ -167,7 +167,7 @@ impl Pager for Random {
 }
 
 struct Clock {
-    frame_table: Rc<RefCell<Vec<Frame>>>,
+    frame_table: Rc<RefCell<Vec<Option<Frame>>>>,
     free_frames: Rc<RefCell<VecDeque<usize>>>,
     processes: Rc<RefCell<Vec<Process>>>,
     hand: usize,
@@ -176,7 +176,7 @@ struct Clock {
 
 impl Clock {
     fn new(
-        frame_table: Rc<RefCell<Vec<Frame>>>,
+        frame_table: Rc<RefCell<Vec<Option<Frame>>>>,
         free_frames: Rc<RefCell<VecDeque<usize>>>,
         processes: Rc<RefCell<Vec<Process>>>,
     ) -> Clock {
@@ -195,12 +195,13 @@ impl Pager for Clock {
     fn select_victim_frame(&mut self) -> usize {
         let mut frame_idx = self.hand;
         loop {
+            // get frame and then destructure and match frame to pid and vpage
             let frame = &self.frame_table.borrow()[frame_idx % &self.num_frames];
-            // destructure and match frame to pid and vpage
-            let (pid, vpage) = match (frame.pid, frame.vpage) {
-                (Some(pid), Some(vpage)) => (pid, vpage),
-                _ => panic!("Frame not mapped to a process"),
+            let (pid, vpage) = match frame {
+                Some(frame) => (frame.pid, frame.vpage),
+                None => panic!("frame table entry is empty"),
             };
+
             let page = &mut self.processes.borrow_mut()[pid as usize].page_table.entries[vpage];
             if page.referenced {
                 page.referenced = false;
@@ -214,7 +215,7 @@ impl Pager for Clock {
 }
 
 struct MMU {
-    frame_table: Rc<RefCell<Vec<Frame>>>,
+    frame_table: Rc<RefCell<Vec<Option<Frame>>>>,
     free_frames: Rc<RefCell<VecDeque<usize>>>,
     pager: Box<dyn Pager>,
     processes: Rc<RefCell<Vec<Process>>>,
@@ -223,12 +224,11 @@ struct MMU {
     // stats
     ctx_switches: u64,
     process_exits: u64,
-    cost: u64,
 }
 
 impl MMU {
     fn new(
-        frame_table: Rc<RefCell<Vec<Frame>>>,
+        frame_table: Rc<RefCell<Vec<Option<Frame>>>>,
         free_frames: Rc<RefCell<VecDeque<usize>>>,
         pager: Box<dyn Pager>,
         processes: Rc<RefCell<Vec<Process>>>,
@@ -241,7 +241,6 @@ impl MMU {
             current_process: None,
             ctx_switches: 0,
             process_exits: 0,
-            cost: 0,
         }
     }
 
@@ -251,11 +250,10 @@ impl MMU {
         }
 
         let frame_idx = self.pager.select_victim_frame();
-        let frame = self.frame_table.borrow()[frame_idx];
-        let (pid, vpage) = match (frame.pid, frame.vpage) {
-            (Some(pid), Some(vpage)) => (pid, vpage),
-            _ => panic!("Frame not mapped to a process"),
-        };
+        let frame = self.frame_table.borrow()[frame_idx].unwrap();
+        // destructure frame to pid and vpage
+        let (pid, vpage) = (frame.pid, frame.vpage);
+
         let proc = &mut self.processes.borrow_mut()[pid as usize];
         let page = &mut proc.page_table.entries[vpage];
         println!(" UNMAP {}:{}", pid, vpage);
@@ -315,13 +313,16 @@ impl MMU {
 
                     // 3. if valid then assign a frame
                     let frame_idx = self.get_frame();
-                    let frame = &mut self.frame_table.borrow_mut()[frame_idx];
                     let proc = &mut self.processes.borrow_mut()[self.current_process.unwrap()];
                     let page = &mut proc.page_table.entries[vpage];
                     page.present = true;
                     page.frame = Some(frame_idx);
-                    frame.pid = Some(self.current_process.unwrap() as u64);
-                    frame.vpage = Some(vpage);
+
+                    let mut frame_table = self.frame_table.borrow_mut();
+                    frame_table[frame_idx] = Some(Frame {
+                        pid: self.current_process.unwrap() as u64,
+                        vpage: vpage,
+                    });
 
                     // 4. populate it -
                     //    if paged out then we need bring it "IN" from swap space
@@ -371,24 +372,17 @@ impl MMU {
                     page.paged_out = false; // reset paged out bit
                     if page.present {
                         let frame_idx = page.frame.unwrap();
-                        let frame = &mut self.frame_table.borrow_mut()[frame_idx];
-                        frame.pid = None;
-                        frame.vpage = None;
+                        let mut frame_table = self.frame_table.borrow_mut();
+                        frame_table[frame_idx] = None;
                         self.free_frames.borrow_mut().push_back(frame_idx);
                         page.present = false;
                         page.frame = None;
                         println!(" UNMAP {}:{}", pid, vpage);
                         proc.unmaps += 1;
 
-                        // all the below code is not required i think
-                        if page.modified {
-                            if page.file_mapped {
-                                println!(" FOUT");
-                                proc.fouts += 1;
-                            } else {
-                                // println!(" OUT");
-                                // proc.outs += 1;
-                            }
+                        if page.modified && page.file_mapped {
+                            println!(" FOUT");
+                            proc.fouts += 1;
                         }
                     }
                 }
@@ -504,13 +498,8 @@ fn actual_main_fn(num_frames: usize, algorithm: &str, inputfile: &str, randomfil
     // Read input file
     let (processes, instructions) = read_input_file(&inputfile);
 
-    let frame_table = Rc::new(RefCell::new(vec![
-        Frame {
-            pid: None,
-            vpage: None,
-        };
-        num_frames
-    ]));
+    let frame_table: Rc<RefCell<Vec<Option<Frame>>>> =
+        Rc::new(RefCell::new(vec![None; num_frames]));
 
     // Create a list of free frames as Rc<RefCell<VecDeque<usize>>>
     let mut free_frames = Rc::new(RefCell::new(VecDeque::new()));
@@ -577,13 +566,10 @@ fn actual_main_fn(num_frames: usize, algorithm: &str, inputfile: &str, randomfil
     print!("FT:");
     let frame_table = frame_table.as_ref().borrow();
     for frame in frame_table.iter() {
-        match (frame.pid, frame.vpage) {
-            (Some(pid), Some(vpage)) => {
-                print!(" {}:{}", pid, vpage);
-            }
-            _ => {
-                print!(" *");
-            }
+        if let Some(frame) = frame {
+            print!(" {}:{}", frame.pid, frame.vpage);
+        } else {
+            print!(" *");
         }
     }
     println!();
@@ -629,7 +615,7 @@ fn actual_main_fn(num_frames: usize, algorithm: &str, inputfile: &str, randomfil
         mmu.ctx_switches,
         mmu.process_exits,
         cost,
-        4 // instructions.len(), mmu.ctx_switches, mmu.process_exits, cost, std::mem::size_of::<PTE>()
+        4 // std::mem::size_of::<PTE>()
     );
 }
 
