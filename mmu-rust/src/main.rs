@@ -5,6 +5,49 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::rc::Rc;
 
+// Define a struct to hold the flags
+#[derive(Debug, Default)]
+struct Flags {
+    O_option: bool,
+    P_option: bool,
+    F_option: bool,
+    S_option: bool,
+    x_option: bool,
+    y_option: bool,
+    f_option: bool,
+    a_option: bool,
+}
+
+macro_rules! O_trace {
+    ($O_option:expr, $idx:expr, $operation:expr, $address:expr) => {
+        if $O_option {
+            println!("{}: ==> {} {}", $idx, $operation, $address);
+        }
+    };
+}
+
+// prints the frame table
+macro_rules! F_trace {
+    ($flag:expr, $frame_table:expr) => {
+        if $flag {
+            print!("FT:");
+            let frame_table = $frame_table.as_ref().borrow();
+            for frame in frame_table.iter() {
+                if let Some(frame) = frame {
+                    print!(" {}:{}", frame.pid, frame.vpage);
+                } else {
+                    print!(" *");
+                }
+            }
+            println!();
+        }
+    };
+}
+
+macro_rules! a_trace {
+    () => {};
+}
+
 #[derive(Debug)]
 struct VMA {
     start: usize,
@@ -194,6 +237,7 @@ impl Clock {
 impl Pager for Clock {
     fn select_victim_frame(&mut self) -> usize {
         let mut frame_idx = self.hand;
+        let old_hand = self.hand;
         loop {
             // get frame and then destructure and match frame to pid and vpage
             let frame = &self.frame_table.borrow()[frame_idx % &self.num_frames];
@@ -207,10 +251,84 @@ impl Pager for Clock {
                 page.referenced = false;
                 frame_idx += 1;
             } else {
+                // print!("ASELECT {} {}", old_hand, frame_idx - old_hand + 1); // need to wrap this in a trace which depends of the a_trace flag
                 self.hand = frame_idx % self.num_frames + 1;
                 return frame_idx % self.num_frames;
             }
         }
+    }
+}
+
+struct NRU {
+    frame_table: Rc<RefCell<Vec<Option<Frame>>>>,
+    free_frames: Rc<RefCell<VecDeque<usize>>>,
+    processes: Rc<RefCell<Vec<Process>>>,
+    hand: usize,
+    num_frames: usize,
+    classes: Vec<Option<usize>>,
+}
+
+impl NRU {
+    fn new(
+        frame_table: Rc<RefCell<Vec<Option<Frame>>>>,
+        free_frames: Rc<RefCell<VecDeque<usize>>>,
+        processes: Rc<RefCell<Vec<Process>>>,
+    ) -> NRU {
+        let num_frames = frame_table.borrow().len();
+        let classes = vec![None; 4];
+        NRU {
+            frame_table: frame_table,
+            free_frames: free_frames,
+            processes: processes,
+            hand: 0,
+            num_frames: num_frames,
+            classes: classes,
+        }
+    }
+}
+
+impl Pager for NRU {
+    fn select_victim_frame(&mut self) -> usize {
+        let mut frame_idx = self.hand;
+        let hand_start = self.hand;
+        loop {
+            // get frame and then destructure and match frame to pid and vpage
+            let frame = &self.frame_table.borrow()[frame_idx % &self.num_frames];
+            let (pid, vpage) = match frame {
+                Some(frame) => (frame.pid, frame.vpage),
+                None => panic!("frame table entry is empty"),
+            };
+
+            let page = &mut self.processes.borrow_mut()[pid as usize].page_table.entries[vpage];
+            let class = page.referenced as usize * 2 + page.modified as usize;
+
+            // if class is empty, set it to the current frame
+            if self.classes[class].is_none() {
+                self.classes[class] = Some(frame_idx % self.num_frames); // or just frame_idx
+            }
+
+            if self.classes[0].is_some() {
+                break;
+            }
+
+            // TODO
+            // one cycle through the frame table and no empty classes
+            if frame_idx - hand_start == self.num_frames - 1 {
+                break;
+            }
+
+            frame_idx += 1;
+        }
+
+        // choose the lowest class frame idx and set the hand to the next frame
+        for i in 0..4 {
+            if let Some(frame_idx) = self.classes[i] {
+                self.hand = frame_idx % self.num_frames + 1;
+                return frame_idx;
+            }
+        }
+
+        frame_idx
     }
 }
 
@@ -494,7 +612,13 @@ fn read_input_file(filename: &str) -> (Vec<Process>, Vec<(String, usize)>) {
 
     (processes, instructions)
 }
-fn actual_main_fn(num_frames: usize, algorithm: &str, inputfile: &str, randomfile: &str) {
+fn actual_main_fn(
+    flags: Flags,
+    num_frames: usize,
+    algorithm: &str,
+    inputfile: &str,
+    randomfile: &str,
+) {
     // Read input file
     let (processes, instructions) = read_input_file(&inputfile);
 
@@ -502,7 +626,7 @@ fn actual_main_fn(num_frames: usize, algorithm: &str, inputfile: &str, randomfil
         Rc::new(RefCell::new(vec![None; num_frames]));
 
     // Create a list of free frames as Rc<RefCell<VecDeque<usize>>>
-    let mut free_frames = Rc::new(RefCell::new(VecDeque::new()));
+    let free_frames = Rc::new(RefCell::new(VecDeque::new()));
     for i in 0..num_frames {
         free_frames.borrow_mut().push_back(i);
     }
@@ -526,7 +650,12 @@ fn actual_main_fn(num_frames: usize, algorithm: &str, inputfile: &str, randomfil
             free_frames.clone(),
             processes.clone(),
         )) as Box<dyn Pager>,
-        // "e" => Pager::NRU,
+
+        "e" => Box::new(NRU::new(
+            frame_table.clone(),
+            free_frames.clone(),
+            processes.clone(),
+        )) as Box<dyn Pager>,
         // "a" => Pager::Aging,
         _ => panic!("Invalid algorithm: {}", algorithm),
     };
@@ -539,42 +668,40 @@ fn actual_main_fn(num_frames: usize, algorithm: &str, inputfile: &str, randomfil
         processes.clone(),
     );
     for (idx, (operation, address)) in instructions.iter().cloned().enumerate() {
-        println!("{}: ==> {} {}", idx, operation, address);
+        O_trace!(flags.O_option, idx, operation, address);
         mmu.process_instruction(&operation, address);
     }
 
     // Print end stats
     // 1. print page table of each process
-    for (idx, process) in processes.borrow().iter().enumerate() {
-        print!("PT[{}]:", idx);
-        for (idx, entry) in process.page_table.entries.iter().enumerate() {
-            if entry.paged_out && !entry.present && !entry.file_mapped {
-                print!(" #");
-            } else if !entry.is_valid_vma || !entry.present {
-                print!(" *");
-            } else {
-                print!(" {}:", idx);
-                print!("{}", if entry.referenced { 'R' } else { '-' });
-                print!("{}", if entry.modified { 'M' } else { '-' });
-                print!("{}", if entry.paged_out { 'S' } else { '-' });
+    if flags.P_option {
+        for (idx, process) in processes.borrow().iter().enumerate() {
+            print!("PT[{}]:", idx);
+            for (idx, entry) in process.page_table.entries.iter().enumerate() {
+                if entry.paged_out && !entry.present && !entry.file_mapped {
+                    print!(" #");
+                } else if !entry.is_valid_vma || !entry.present {
+                    print!(" *");
+                } else {
+                    print!(" {}:", idx);
+                    print!("{}", if entry.referenced { 'R' } else { '-' });
+                    print!("{}", if entry.modified { 'M' } else { '-' });
+                    print!("{}", if entry.paged_out { 'S' } else { '-' });
+                }
             }
+            println!();
         }
-        println!();
     }
 
     // 2. print frame table
-    print!("FT:");
-    let frame_table = frame_table.as_ref().borrow();
-    for frame in frame_table.iter() {
-        if let Some(frame) = frame {
-            print!(" {}:{}", frame.pid, frame.vpage);
-        } else {
-            print!(" *");
-        }
-    }
-    println!();
+    F_trace!(flags.F_option, frame_table);
 
     // 3. per process stats
+    // need to write the S_trace! macro for this
+    if !flags.S_option {
+        return;
+    }
+
     for (idx, process) in processes.borrow().iter().enumerate() {
         println!(
             "PROC[{}]: U={} M={} I={} O={} FI={} FO={} Z={} SV={} SP={}",
@@ -619,7 +746,7 @@ fn actual_main_fn(num_frames: usize, algorithm: &str, inputfile: &str, randomfil
     );
 }
 
-fn parse_args(actual_args: &Vec<String>) -> (usize, String, String, String) {
+fn parse_args(actual_args: &Vec<String>) -> (Flags, usize, String, String, String) {
     let matches = App::new("MMU program")
         .arg(
             Arg::with_name("num_frames")
@@ -668,7 +795,25 @@ fn parse_args(actual_args: &Vec<String>) -> (usize, String, String, String) {
     let inputfile = matches.value_of("inputfile").unwrap().to_string();
     let randomfile = matches.value_of("randomfile").unwrap().to_string();
 
-    (num_frames, algorithm, inputfile, randomfile)
+    let mut flags = Flags::default();
+
+    if let Some(option_str) = matches.value_of("option") {
+        for option in option_str.chars() {
+            match option {
+                'O' => flags.O_option = true,
+                'P' => flags.P_option = true,
+                'F' => flags.F_option = true,
+                'S' => flags.S_option = true,
+                'x' => flags.x_option = true,
+                'y' => flags.y_option = true,
+                'f' => flags.f_option = true,
+                'a' => flags.a_option = true,
+                _ => (),
+            }
+        }
+    }
+
+    (flags, num_frames, algorithm, inputfile, randomfile)
 }
 
 fn get_default_args() -> Vec<String> {
@@ -676,6 +821,7 @@ fn get_default_args() -> Vec<String> {
         "mmu-rust".to_string(),
         "-f16".to_string(),
         "-af".to_string(),
+        "-oOPFS".to_string(),
         "../mmu/lab3_assign/in1".to_string(),
         "../mmu/lab3_assign/rfile".to_string(),
     ]
@@ -693,7 +839,7 @@ fn main() {
     };
 
     // Parse command line arguments
-    let (num_frames, algorithm, inputfile, randomfile) = parse_args(&actual_args);
+    let (flags, num_frames, algorithm, inputfile, randomfile) = parse_args(&actual_args);
 
     // log the arguments
     // println!("ARG num_frames: {}", num_frames);
@@ -701,5 +847,5 @@ fn main() {
     // println!("ARG inputfile: {}", inputfile);
     // println!("ARG randomfile: {}", randomfile);
     // Call your main function with the parsed arguments
-    actual_main_fn(num_frames, &algorithm, &inputfile, &randomfile);
+    actual_main_fn(flags, num_frames, &algorithm, &inputfile, &randomfile);
 }
