@@ -18,6 +18,19 @@ struct Flags {
     a_option: bool,
 }
 
+
+fn print_frame_table(frame_table: Rc<RefCell<Vec<Option<Frame>>>>) {
+    print!("FT:");
+    let frame_table = frame_table.as_ref().borrow();
+    for frame in frame_table.iter() {
+        if let Some(frame) = frame {
+            print!(" {}:{}", frame.pid, frame.vpage);
+        } else {
+            print!(" *");
+        }
+    }
+    println!();
+}
 macro_rules! O_trace {
     ($O_option:expr, $idx:expr, $operation:expr, $address:expr) => {
         if $O_option {
@@ -30,16 +43,16 @@ macro_rules! O_trace {
 macro_rules! F_trace {
     ($flag:expr, $frame_table:expr) => {
         if $flag {
-            print!("FT:");
-            let frame_table = $frame_table.as_ref().borrow();
-            for frame in frame_table.iter() {
-                if let Some(frame) = frame {
-                    print!(" {}:{}", frame.pid, frame.vpage);
-                } else {
-                    print!(" *");
-                }
-            }
-            println!();
+            print_frame_table($frame_table);
+        }
+    };
+}
+
+// prints the frame table
+macro_rules! f_trace {
+    ($flag:expr, $frame_table:expr) => {
+        if $flag {
+            print_frame_table($frame_table);
         }
     };
 }
@@ -253,7 +266,7 @@ impl Pager for Clock {
                 page.referenced = false;
                 frame_idx += 1;
             } else {
-                a_trace!("ASELECT {} {}", old_hand, frame_idx - old_hand + 1);
+                a_trace!("ASELECT {} {}", old_hand % self.num_frames, frame_idx - old_hand + 1); // this doesn't match with the tomasort code
                 self.hand = frame_idx % self.num_frames + 1;
                 return frame_idx % self.num_frames;
             }
@@ -292,7 +305,8 @@ impl NRU {
 impl Pager for NRU {
     fn select_victim_frame(&mut self) -> usize {
         let mut frame_idx = self.hand;
-        let hand_start = self.hand;
+        let old_hand = self.hand;
+        let reset = 0;
         loop {
             // get frame and then destructure and match frame to pid and vpage
             let frame = &self.frame_table.borrow()[frame_idx % &self.num_frames];
@@ -315,7 +329,7 @@ impl Pager for NRU {
 
             // TODO
             // one cycle through the frame table and no empty classes
-            if frame_idx - hand_start == self.num_frames - 1 {
+            if frame_idx - old_hand == self.num_frames - 1 {
                 break;
             }
 
@@ -325,6 +339,14 @@ impl Pager for NRU {
         // choose the lowest class frame idx and set the hand to the next frame
         for i in 0..4 {
             if let Some(frame_idx) = self.classes[i] {
+                a_trace!(
+                    "ASELECT: hand={} {} | {} {} {}",
+                    old_hand,
+                    reset,
+                    i,
+                    frame_idx % self.num_frames,
+                    frame_idx as i32 - old_hand as i32 + 1
+                );
                 self.hand = frame_idx % self.num_frames + 1;
                 return frame_idx;
             }
@@ -509,6 +531,7 @@ impl MMU {
             }
             _ => panic!("Invalid operation: {}", operation),
         }
+        // f_trace!(Flags)
     }
 }
 fn read_random_file(filename: &str) -> Vec<usize> {
@@ -822,9 +845,9 @@ fn get_default_args() -> Vec<String> {
     vec![
         "mmu-rust".to_string(),
         "-f16".to_string(),
-        "-ac".to_string(),
+        "-ae".to_string(),
         "-oOPFS".to_string(),
-        "../mmu/lab3_assign/in4".to_string(),
+        "../mmu/lab3_assign/in1".to_string(),
         "../mmu/lab3_assign/rfile".to_string(),
     ]
 }
