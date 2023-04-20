@@ -3,6 +3,7 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
+use std::os::unix::thread;
 use std::rc::Rc;
 
 // Define a struct to hold the flags
@@ -18,6 +19,9 @@ struct Flags {
     a_option: bool,
 }
 
+thread_local! {
+    static TFLAGS: RefCell<Flags> = RefCell::new(Flags::default());
+}
 
 fn print_frame_table(frame_table: Rc<RefCell<Vec<Option<Frame>>>>) {
     print!("FT:");
@@ -50,10 +54,13 @@ macro_rules! F_trace {
 
 // prints the frame table
 macro_rules! f_trace {
-    ($flag:expr, $frame_table:expr) => {
-        if $flag {
-            print_frame_table($frame_table);
-        }
+    ($frame_table:expr) => {
+        TFLAGS.with(|tflags| {
+            let tflags = tflags.borrow();
+            if tflags.f_option {
+                print_frame_table($frame_table);
+            }
+        });
     };
 }
 
@@ -266,7 +273,11 @@ impl Pager for Clock {
                 page.referenced = false;
                 frame_idx += 1;
             } else {
-                a_trace!("ASELECT {} {}", old_hand % self.num_frames, frame_idx - old_hand + 1); // this doesn't match with the tomasort code
+                a_trace!(
+                    "ASELECT {} {}",
+                    old_hand % self.num_frames,
+                    frame_idx - old_hand + 1
+                ); // this doesn't match with the tomasort code
                 self.hand = frame_idx % self.num_frames + 1;
                 return frame_idx % self.num_frames;
             }
@@ -531,7 +542,7 @@ impl MMU {
             }
             _ => panic!("Invalid operation: {}", operation),
         }
-        // f_trace!(Flags)
+        f_trace!(self.frame_table.clone());
     }
 }
 fn read_random_file(filename: &str) -> Vec<usize> {
@@ -821,21 +832,47 @@ fn parse_args(actual_args: &Vec<String>) -> (Flags, usize, String, String, Strin
     let randomfile = matches.value_of("randomfile").unwrap().to_string();
 
     let mut flags = Flags::default();
-
+    // CLEAN UP have only global flags
     if let Some(option_str) = matches.value_of("option") {
-        for option in option_str.chars() {
-            match option {
-                'O' => flags.O_option = true,
-                'P' => flags.P_option = true,
-                'F' => flags.F_option = true,
-                'S' => flags.S_option = true,
-                'x' => flags.x_option = true,
-                'y' => flags.y_option = true,
-                'f' => flags.f_option = true,
-                'a' => flags.a_option = true,
-                _ => (),
+        TFLAGS.with(|tflags| {
+            let mut tflags = tflags.borrow_mut();
+            for option in option_str.chars() {
+                match option {
+                    'O' => {
+                        flags.O_option = true;
+                        tflags.O_option = true;
+                    }
+                    'P' => {
+                        flags.P_option = true;
+                        tflags.P_option = true;
+                    }
+                    'F' =>  {
+                        flags.F_option = true;
+                        tflags.F_option = true;
+                    }
+                    'S' => {
+                        flags.S_option = true;
+                        tflags.S_option = true;
+                    }
+                    'x' => {
+                        flags.x_option = true;
+                        tflags.x_option = true;}
+                    'y' => {
+                        flags.y_option = true;
+                        tflags.y_option = true;
+                    }
+                    'f' => {
+                        flags.f_option = true;
+                        tflags.f_option = true;
+                    }
+                    'a' => {
+                        flags.a_option = true;
+                        tflags.a_option = true;
+                    }
+                    _ => (),
+                }
             }
-        }
+        });
     }
 
     (flags, num_frames, algorithm, inputfile, randomfile)
@@ -845,9 +882,9 @@ fn get_default_args() -> Vec<String> {
     vec![
         "mmu-rust".to_string(),
         "-f16".to_string(),
-        "-ae".to_string(),
-        "-oOPFS".to_string(),
-        "../mmu/lab3_assign/in1".to_string(),
+        "-ac".to_string(),
+        "-oOPFSf".to_string(),
+        "../mmu/lab3_assign/in11".to_string(),
         "../mmu/lab3_assign/rfile".to_string(),
     ]
 }
