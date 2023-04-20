@@ -52,7 +52,7 @@ macro_rules! F_trace {
     };
 }
 
-// prints the frame table
+// prints the frame table at the end of each instruction
 macro_rules! f_trace {
     ($frame_table:expr) => {
         TFLAGS.with(|tflags| {
@@ -66,7 +66,12 @@ macro_rules! f_trace {
 
 macro_rules! a_trace {
     ($($arg:tt)*) => {
-        println!($($arg)*);
+        TFLAGS.with(|tflags| {
+            let tflags = tflags.borrow();
+            if tflags.a_option {
+                println!($($arg)*);
+            }
+        });
     };
 }
 
@@ -439,6 +444,7 @@ impl MMU {
                 let pid = argument;
                 self.current_process = Some(pid);
                 self.ctx_switches += 1;
+                return; // to avoid trace
             }
             "r" | "w" => {
                 let vpage = argument;
@@ -508,7 +514,6 @@ impl MMU {
                         if page.write_protected {
                             println!(" SEGPROT");
                             proc.segprot += 1;
-                            return;
                         } else {
                             page.modified = true;
                         }
@@ -539,6 +544,7 @@ impl MMU {
                         }
                     }
                 }
+                return; // to avoid trace
             }
             _ => panic!("Invalid operation: {}", operation),
         }
@@ -883,8 +889,8 @@ fn get_default_args() -> Vec<String> {
         "mmu-rust".to_string(),
         "-f16".to_string(),
         "-ac".to_string(),
-        "-oOPFSf".to_string(),
-        "../mmu/lab3_assign/in11".to_string(),
+        "-oOPFSaf".to_string(),
+        "../mmu/lab3_assign/in10".to_string(),
         "../mmu/lab3_assign/rfile".to_string(),
     ]
 }
