@@ -35,20 +35,27 @@ fn print_frame_table(frame_table: Rc<RefCell<Vec<Option<Frame>>>>) {
     }
     println!();
 }
+
 macro_rules! O_trace {
-    ($O_option:expr, $idx:expr, $operation:expr, $address:expr) => {
-        if $O_option {
-            println!("{}: ==> {} {}", $idx, $operation, $address);
-        }
+    ($idx:expr, $operation:expr, $address:expr) => {
+        TFLAGS.with(|tflags| {
+            let tflags = tflags.borrow();
+            if tflags.O_option {
+                println!("{}: ==> {} {}", $idx, $operation, $address);
+            }
+        });
     };
 }
 
 // prints the frame table
 macro_rules! F_trace {
-    ($flag:expr, $frame_table:expr) => {
-        if $flag {
-            print_frame_table($frame_table);
-        }
+    ($frame_table:expr) => {
+        TFLAGS.with(|tflags| {
+            let tflags = tflags.borrow();
+            if tflags.F_option {
+                print_frame_table($frame_table);
+            }
+        });
     };
 }
 
@@ -654,13 +661,7 @@ fn read_input_file(filename: &str) -> (Vec<Process>, Vec<(String, usize)>) {
 
     (processes, instructions)
 }
-fn actual_main_fn(
-    flags: Flags,
-    num_frames: usize,
-    algorithm: &str,
-    inputfile: &str,
-    randomfile: &str,
-) {
+fn actual_main_fn(num_frames: usize, algorithm: &str, inputfile: &str, randomfile: &str) {
     // Read input file
     let (processes, instructions) = read_input_file(&inputfile);
 
@@ -710,13 +711,14 @@ fn actual_main_fn(
         processes.clone(),
     );
     for (idx, (operation, address)) in instructions.iter().cloned().enumerate() {
-        O_trace!(flags.O_option, idx, operation, address);
+        O_trace!(idx, operation, address);
         mmu.process_instruction(&operation, address);
     }
 
     // Print end stats
     // 1. print page table of each process
-    if flags.P_option {
+    let P_option = { TFLAGS.with(|flags| flags.borrow().P_option) };
+    if P_option {
         for (idx, process) in processes.borrow().iter().enumerate() {
             print!("PT[{}]:", idx);
             for (idx, entry) in process.page_table.entries.iter().enumerate() {
@@ -736,11 +738,12 @@ fn actual_main_fn(
     }
 
     // 2. print frame table
-    F_trace!(flags.F_option, frame_table);
+    F_trace!(frame_table);
 
     // 3. per process stats
     // need to write the S_trace! macro for this
-    if !flags.S_option {
+    let S_option = { TFLAGS.with(|flags| flags.borrow().S_option) };
+    if S_option {
         return;
     }
 
@@ -788,7 +791,7 @@ fn actual_main_fn(
     );
 }
 
-fn parse_args(actual_args: &Vec<String>) -> (Flags, usize, String, String, String) {
+fn parse_args(actual_args: &Vec<String>) -> (usize, String, String, String) {
     let matches = App::new("MMU program")
         .arg(
             Arg::with_name("num_frames")
@@ -837,60 +840,35 @@ fn parse_args(actual_args: &Vec<String>) -> (Flags, usize, String, String, Strin
     let inputfile = matches.value_of("inputfile").unwrap().to_string();
     let randomfile = matches.value_of("randomfile").unwrap().to_string();
 
-    let mut flags = Flags::default();
-    // CLEAN UP have only global flags
     if let Some(option_str) = matches.value_of("option") {
         TFLAGS.with(|tflags| {
             let mut tflags = tflags.borrow_mut();
             for option in option_str.chars() {
                 match option {
-                    'O' => {
-                        flags.O_option = true;
-                        tflags.O_option = true;
-                    }
-                    'P' => {
-                        flags.P_option = true;
-                        tflags.P_option = true;
-                    }
-                    'F' =>  {
-                        flags.F_option = true;
-                        tflags.F_option = true;
-                    }
-                    'S' => {
-                        flags.S_option = true;
-                        tflags.S_option = true;
-                    }
-                    'x' => {
-                        flags.x_option = true;
-                        tflags.x_option = true;}
-                    'y' => {
-                        flags.y_option = true;
-                        tflags.y_option = true;
-                    }
-                    'f' => {
-                        flags.f_option = true;
-                        tflags.f_option = true;
-                    }
-                    'a' => {
-                        flags.a_option = true;
-                        tflags.a_option = true;
-                    }
+                    'O' => tflags.O_option = true,
+                    'P' => tflags.P_option = true,
+                    'F' => tflags.F_option = true,
+                    'S' => tflags.S_option = true,
+                    'x' => tflags.x_option = true,
+                    'y' => tflags.y_option = true,
+                    'f' => tflags.f_option = true,
+                    'a' => tflags.a_option = true,
                     _ => (),
                 }
             }
         });
     }
 
-    (flags, num_frames, algorithm, inputfile, randomfile)
+    (num_frames, algorithm, inputfile, randomfile)
 }
 
 fn get_default_args() -> Vec<String> {
     vec![
         "mmu-rust".to_string(),
         "-f16".to_string(),
-        "-ac".to_string(),
+        "-ae".to_string(),
         "-oOPFSaf".to_string(),
-        "../mmu/lab3_assign/in10".to_string(),
+        "../mmu/lab3_assign/in1".to_string(),
         "../mmu/lab3_assign/rfile".to_string(),
     ]
 }
@@ -898,16 +876,10 @@ fn get_default_args() -> Vec<String> {
 fn main() {
     let default_args = get_default_args();
     let args = std::env::args().collect::<Vec<String>>();
-    let actual_args = if args.len() > 1 {
-        // println!("ACTUAL ARGS: {:?}", args);
-        &args
-    } else {
-        // println!("DEFAULT ARGS: {:?}", default_args);
-        &default_args
-    };
+    let actual_args = if args.len() > 1 { &args } else { &default_args };
 
     // Parse command line arguments
-    let (flags, num_frames, algorithm, inputfile, randomfile) = parse_args(&actual_args);
+    let (num_frames, algorithm, inputfile, randomfile) = parse_args(&actual_args);
 
     // log the arguments
     // println!("ARG num_frames: {}", num_frames);
@@ -915,5 +887,5 @@ fn main() {
     // println!("ARG inputfile: {}", inputfile);
     // println!("ARG randomfile: {}", randomfile);
     // Call your main function with the parsed arguments
-    actual_main_fn(flags, num_frames, &algorithm, &inputfile, &randomfile);
+    actual_main_fn(num_frames, &algorithm, &inputfile, &randomfile);
 }
