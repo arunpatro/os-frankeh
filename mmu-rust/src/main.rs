@@ -183,19 +183,14 @@ trait Pager {
 
 struct FIFO {
     frame_table: Rc<RefCell<Vec<Option<Frame>>>>,
-    free_frames: Rc<RefCell<VecDeque<usize>>>,
     hand: usize,
     num_frames: usize,
 }
 impl FIFO {
-    fn new(
-        frame_table: Rc<RefCell<Vec<Option<Frame>>>>,
-        free_frames: Rc<RefCell<VecDeque<usize>>>,
-    ) -> FIFO {
+    fn new(frame_table: Rc<RefCell<Vec<Option<Frame>>>>) -> FIFO {
         let num_frames = frame_table.borrow().len();
         FIFO {
             frame_table: frame_table,
-            free_frames: free_frames,
             hand: 0,
             num_frames: num_frames,
         }
@@ -212,22 +207,16 @@ impl Pager for FIFO {
 
 struct Random {
     frame_table: Rc<RefCell<Vec<Option<Frame>>>>,
-    free_frames: Rc<RefCell<VecDeque<usize>>>,
     hand: usize,
     num_frames: usize,
     random_numbers: Vec<usize>,
 }
 
 impl Random {
-    fn new(
-        frame_table: Rc<RefCell<Vec<Option<Frame>>>>,
-        free_frames: Rc<RefCell<VecDeque<usize>>>,
-        random_numbers: Vec<usize>,
-    ) -> Random {
+    fn new(frame_table: Rc<RefCell<Vec<Option<Frame>>>>, random_numbers: Vec<usize>) -> Random {
         let num_frames = frame_table.borrow().len();
         Random {
             frame_table: frame_table,
-            free_frames: free_frames,
             hand: 0,
             num_frames: num_frames,
             random_numbers: random_numbers,
@@ -245,7 +234,6 @@ impl Pager for Random {
 
 struct Clock {
     frame_table: Rc<RefCell<Vec<Option<Frame>>>>,
-    free_frames: Rc<RefCell<VecDeque<usize>>>,
     processes: Rc<RefCell<Vec<Process>>>,
     hand: usize,
     num_frames: usize,
@@ -254,13 +242,11 @@ struct Clock {
 impl Clock {
     fn new(
         frame_table: Rc<RefCell<Vec<Option<Frame>>>>,
-        free_frames: Rc<RefCell<VecDeque<usize>>>,
         processes: Rc<RefCell<Vec<Process>>>,
     ) -> Clock {
         let num_frames = frame_table.borrow().len();
         Clock {
             frame_table: frame_table,
-            free_frames: free_frames,
             processes: processes,
             hand: 0,
             num_frames: num_frames,
@@ -299,28 +285,27 @@ impl Pager for Clock {
 
 struct NRU {
     frame_table: Rc<RefCell<Vec<Option<Frame>>>>,
-    free_frames: Rc<RefCell<VecDeque<usize>>>,
     processes: Rc<RefCell<Vec<Process>>>,
     hand: usize,
     num_frames: usize,
     classes: Vec<Option<usize>>,
+    instruction_counter: u64,
 }
 
 impl NRU {
     fn new(
         frame_table: Rc<RefCell<Vec<Option<Frame>>>>,
-        free_frames: Rc<RefCell<VecDeque<usize>>>,
         processes: Rc<RefCell<Vec<Process>>>,
     ) -> NRU {
         let num_frames = frame_table.borrow().len();
         let classes = vec![None; 4];
         NRU {
             frame_table: frame_table,
-            free_frames: free_frames,
             processes: processes,
             hand: 0,
             num_frames: num_frames,
             classes: classes,
+            instruction_counter: 0,
         }
     }
 }
@@ -330,16 +315,17 @@ impl Pager for NRU {
         let mut frame_idx = self.hand;
         let old_hand = self.hand;
         let reset = 0;
+        let mut class: usize;
         loop {
             // get frame and then destructure and match frame to pid and vpage
-            let frame = &self.frame_table.borrow()[frame_idx % &self.num_frames];
+            let frame = &self.frame_table.borrow()[frame_idx % self.num_frames];
             let (pid, vpage) = match frame {
                 Some(frame) => (frame.pid, frame.vpage),
                 None => panic!("frame table entry is empty"),
             };
 
             let page = &mut self.processes.borrow_mut()[pid as usize].page_table.entries[vpage];
-            let class = page.referenced as usize * 2 + page.modified as usize;
+            class = page.referenced as usize * 2 + page.modified as usize;
 
             // if class is empty, set it to the current frame
             if self.classes[class].is_none() {
@@ -348,6 +334,7 @@ impl Pager for NRU {
 
             if self.classes[0].is_some() {
                 break;
+            } else if false {
             }
 
             // TODO
@@ -366,7 +353,7 @@ impl Pager for NRU {
                     "ASELECT: hand={} {} | {} {} {}",
                     old_hand,
                     reset,
-                    i,
+                    class,
                     frame_idx % self.num_frames,
                     frame_idx as i32 - old_hand as i32 + 1
                 );
@@ -414,6 +401,10 @@ impl MMU {
             return frame;
         }
 
+        thread_local! {
+            static TESTVAL: RefCell<usize> = RefCell::new(0);
+        }
+
         let frame_idx = self.pager.select_victim_frame();
         let frame = self.frame_table.borrow()[frame_idx].unwrap();
         // destructure frame to pid and vpage
@@ -445,7 +436,7 @@ impl MMU {
 
     fn page_fault_handler(&mut self, vpage: usize) {}
 
-    fn process_instruction(&mut self, operation: &str, argument: usize) {
+    fn process_instruction(&mut self, idx: usize, operation: &str, argument: usize) {
         match operation {
             "c" => {
                 let pid = argument;
@@ -678,27 +669,15 @@ fn actual_main_fn(num_frames: usize, algorithm: &str, inputfile: &str, randomfil
 
     // Create a new MMU and a pager based on the algorithm and process instructions
     let pager = match algorithm {
-        "f" => Box::new(FIFO::new(frame_table.clone(), free_frames.clone())) as Box<dyn Pager>,
+        "f" => Box::new(FIFO::new(frame_table.clone())) as Box<dyn Pager>,
         "r" => {
             let random_numbers = read_random_file(&randomfile);
             // println!("Random numbers: {:?}", random_numbers);
-            Box::new(Random::new(
-                frame_table.clone(),
-                free_frames.clone(),
-                random_numbers,
-            ))
+            Box::new(Random::new(frame_table.clone(), random_numbers))
         }
-        "c" => Box::new(Clock::new(
-            frame_table.clone(),
-            free_frames.clone(),
-            processes.clone(),
-        )) as Box<dyn Pager>,
+        "c" => Box::new(Clock::new(frame_table.clone(), processes.clone())) as Box<dyn Pager>,
 
-        "e" => Box::new(NRU::new(
-            frame_table.clone(),
-            free_frames.clone(),
-            processes.clone(),
-        )) as Box<dyn Pager>,
+        "e" => Box::new(NRU::new(frame_table.clone(), processes.clone())) as Box<dyn Pager>,
         // "a" => Pager::Aging,
         _ => panic!("Invalid algorithm: {}", algorithm),
     };
@@ -712,7 +691,7 @@ fn actual_main_fn(num_frames: usize, algorithm: &str, inputfile: &str, randomfil
     );
     for (idx, (operation, address)) in instructions.iter().cloned().enumerate() {
         O_trace!(idx, operation, address);
-        mmu.process_instruction(&operation, address);
+        mmu.process_instruction(idx, &operation, address);
     }
 
     // Print end stats
