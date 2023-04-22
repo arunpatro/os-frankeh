@@ -3,7 +3,6 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
-use std::os::unix::thread;
 use std::rc::Rc;
 
 // Define a struct to hold the flags
@@ -31,6 +30,24 @@ fn print_frame_table(frame_table: Rc<RefCell<Vec<Option<Frame>>>>) {
             print!(" {}:{}", frame.pid, frame.vpage);
         } else {
             print!(" *");
+        }
+    }
+    println!();
+}
+
+fn print_page_table(processes: Rc<RefCell<Vec<Process>>>, pid: usize) {
+    print!("PT[{}]:", pid);
+    let page_table = &processes.borrow()[pid].page_table;
+    for (idx, entry) in page_table.entries.iter().enumerate() {
+        if entry.paged_out && !entry.present && !entry.file_mapped {
+            print!(" #");
+        } else if !entry.is_valid_vma || !entry.present {
+            print!(" *");
+        } else {
+            print!(" {}:", idx);
+            print!("{}", if entry.referenced { 'R' } else { '-' });
+            print!("{}", if entry.modified { 'M' } else { '-' });
+            print!("{}", if entry.paged_out { 'S' } else { '-' });
         }
     }
     println!();
@@ -66,6 +83,18 @@ macro_rules! f_trace {
             let tflags = tflags.borrow();
             if tflags.f_option {
                 print_frame_table($frame_table);
+            }
+        });
+    };
+}
+
+// prints the page table of current process at the end of each instruction
+macro_rules! x_trace {
+    ($page_table:expr, $pid:expr) => {
+        TFLAGS.with(|tflags| {
+            let tflags = tflags.borrow();
+            if tflags.x_option {
+                print_page_table($page_table, $pid);
             }
         });
     };
@@ -178,7 +207,7 @@ struct Frame {
 }
 
 trait Pager {
-    fn select_victim_frame(&mut self) -> usize;
+    fn select_victim_frame(&mut self, instr_idx: usize) -> usize;
 }
 
 struct FIFO {
@@ -198,7 +227,7 @@ impl FIFO {
 }
 
 impl Pager for FIFO {
-    fn select_victim_frame(&mut self) -> usize {
+    fn select_victim_frame(&mut self, instr_idx: usize) -> usize {
         let frame = self.hand;
         self.hand = (self.hand + 1) % self.num_frames;
         frame
@@ -225,7 +254,7 @@ impl Random {
 }
 
 impl Pager for Random {
-    fn select_victim_frame(&mut self) -> usize {
+    fn select_victim_frame(&mut self, instr_idx: usize) -> usize {
         let frame = self.random_numbers[self.hand] % self.num_frames;
         self.hand = (self.hand + 1) % self.random_numbers.len();
         frame
@@ -255,7 +284,7 @@ impl Clock {
 }
 
 impl Pager for Clock {
-    fn select_victim_frame(&mut self) -> usize {
+    fn select_victim_frame(&mut self, instr_idx: usize) -> usize {
         let mut frame_idx = self.hand;
         let old_hand = self.hand;
         loop {
@@ -288,8 +317,7 @@ struct NRU {
     processes: Rc<RefCell<Vec<Process>>>,
     hand: usize,
     num_frames: usize,
-    classes: Vec<Option<usize>>,
-    instruction_counter: u64,
+    instr_ckpt: usize,
 }
 
 impl NRU {
@@ -298,24 +326,27 @@ impl NRU {
         processes: Rc<RefCell<Vec<Process>>>,
     ) -> NRU {
         let num_frames = frame_table.borrow().len();
-        let classes = vec![None; 4];
         NRU {
             frame_table: frame_table,
             processes: processes,
             hand: 0,
             num_frames: num_frames,
-            classes: classes,
-            instruction_counter: 0,
+            instr_ckpt: 0,
         }
     }
 }
 
 impl Pager for NRU {
-    fn select_victim_frame(&mut self) -> usize {
+    fn select_victim_frame(&mut self, instr_idx: usize) -> usize {
+        let mut classes = vec![None; 4];
         let mut frame_idx = self.hand;
         let old_hand = self.hand;
-        let reset = 0;
+        let mut reset = 0;
         let mut class: usize;
+        if instr_idx - self.instr_ckpt + 1 >= 50 {
+            reset = 1;
+            self.instr_ckpt = instr_idx + 1; // +1 because instr_idx starts at 0, just to offset
+        }
         loop {
             // get frame and then destructure and match frame to pid and vpage
             let frame = &self.frame_table.borrow()[frame_idx % self.num_frames];
@@ -328,13 +359,18 @@ impl Pager for NRU {
             class = page.referenced as usize * 2 + page.modified as usize;
 
             // if class is empty, set it to the current frame
-            if self.classes[class].is_none() {
-                self.classes[class] = Some(frame_idx % self.num_frames); // or just frame_idx
+            if classes[class].is_none() {
+                classes[class] = Some(frame_idx % self.num_frames); // or just frame_idx
             }
 
-            if self.classes[0].is_some() {
+            if reset == 1 {
+                // reset the r bit of all the pages in the frame table
+                // if reset is 1, you have to go through the whole frame table
+
+                page.referenced = false;
+            } else if classes[0].is_some() {
+                // check if class 0 is present and if so, break
                 break;
-            } else if false {
             }
 
             // TODO
@@ -348,21 +384,22 @@ impl Pager for NRU {
 
         // choose the lowest class frame idx and set the hand to the next frame
         for i in 0..4 {
-            if let Some(frame_idx) = self.classes[i] {
+            if let Some(frame_identified) = classes[i] {
+                // println!("{}", frame_idx);
                 a_trace!(
-                    "ASELECT: hand={} {} | {} {} {}",
+                    "ASELECT: hand={:2} {} | {} {:2} {:2}",
                     old_hand,
                     reset,
-                    class,
-                    frame_idx % self.num_frames,
+                    i,
+                    frame_identified,
                     frame_idx as i32 - old_hand as i32 + 1
                 );
-                self.hand = frame_idx % self.num_frames + 1;
-                return frame_idx;
+                self.hand = (frame_identified + 1) % self.num_frames;
+                return frame_identified;
             }
         }
 
-        frame_idx
+        frame_idx % self.num_frames
     }
 }
 
@@ -396,7 +433,7 @@ impl MMU {
         }
     }
 
-    fn get_frame(&mut self) -> usize {
+    fn get_frame(&mut self, instr_idx: usize) -> usize {
         if let Some(frame) = self.free_frames.borrow_mut().pop_front() {
             return frame;
         }
@@ -405,7 +442,7 @@ impl MMU {
             static TESTVAL: RefCell<usize> = RefCell::new(0);
         }
 
-        let frame_idx = self.pager.select_victim_frame();
+        let frame_idx = self.pager.select_victim_frame(instr_idx);
         let frame = self.frame_table.borrow()[frame_idx].unwrap();
         // destructure frame to pid and vpage
         let (pid, vpage) = (frame.pid, frame.vpage);
@@ -469,7 +506,7 @@ impl MMU {
                     }
 
                     // 3. if valid then assign a frame
-                    let frame_idx = self.get_frame();
+                    let frame_idx = self.get_frame(idx);
                     let proc = &mut self.processes.borrow_mut()[self.current_process.unwrap()];
                     let page = &mut proc.page_table.entries[vpage];
                     page.present = true;
@@ -546,6 +583,7 @@ impl MMU {
             }
             _ => panic!("Invalid operation: {}", operation),
         }
+        x_trace!(self.processes.clone(), self.current_process.unwrap());
         f_trace!(self.frame_table.clone());
     }
 }
@@ -698,21 +736,8 @@ fn actual_main_fn(num_frames: usize, algorithm: &str, inputfile: &str, randomfil
     // 1. print page table of each process
     let P_option = { TFLAGS.with(|flags| flags.borrow().P_option) };
     if P_option {
-        for (idx, process) in processes.borrow().iter().enumerate() {
-            print!("PT[{}]:", idx);
-            for (idx, entry) in process.page_table.entries.iter().enumerate() {
-                if entry.paged_out && !entry.present && !entry.file_mapped {
-                    print!(" #");
-                } else if !entry.is_valid_vma || !entry.present {
-                    print!(" *");
-                } else {
-                    print!(" {}:", idx);
-                    print!("{}", if entry.referenced { 'R' } else { '-' });
-                    print!("{}", if entry.modified { 'M' } else { '-' });
-                    print!("{}", if entry.paged_out { 'S' } else { '-' });
-                }
-            }
-            println!();
+        for idx in 0..processes.borrow().len() {
+            print_page_table(processes.clone(), idx);
         }
     }
 
@@ -722,7 +747,7 @@ fn actual_main_fn(num_frames: usize, algorithm: &str, inputfile: &str, randomfil
     // 3. per process stats
     // need to write the S_trace! macro for this
     let S_option = { TFLAGS.with(|flags| flags.borrow().S_option) };
-    if S_option {
+    if !S_option {
         return;
     }
 
@@ -846,8 +871,8 @@ fn get_default_args() -> Vec<String> {
         "mmu-rust".to_string(),
         "-f16".to_string(),
         "-ae".to_string(),
-        "-oOPFSaf".to_string(),
-        "../mmu/lab3_assign/in1".to_string(),
+        "-oOPFSafx".to_string(),
+        "../mmu/lab3_assign/in4".to_string(),
         "../mmu/lab3_assign/rfile".to_string(),
     ]
 }
