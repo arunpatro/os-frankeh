@@ -121,10 +121,10 @@ struct VMA {
 impl VMA {
     fn new(start: usize, end: usize, write_protected: bool, file_mapped: bool) -> VMA {
         VMA {
-            start: start,
-            end: end,
-            write_protected: write_protected,
-            file_mapped: file_mapped,
+            start,
+            end,
+            write_protected,
+            file_mapped,
         }
     }
 }
@@ -175,9 +175,9 @@ impl Process {
                 present: false,
                 referenced: false,
                 modified: false,
-                write_protected: write_protected,
+                write_protected,
                 paged_out: false,
-                file_mapped: file_mapped,
+                file_mapped,
                 is_valid_vma: vma.is_some(),
             });
         }
@@ -185,8 +185,8 @@ impl Process {
         let page_table = PageTable { entries };
 
         Process {
-            vmas: vmas,
-            page_table: page_table,
+            vmas,
+            page_table,
             unmaps: 0,
             maps: 0,
             ins: 0,
@@ -219,15 +219,15 @@ impl FIFO {
     fn new(frame_table: Rc<RefCell<Vec<Option<Frame>>>>) -> FIFO {
         let num_frames = frame_table.borrow().len();
         FIFO {
-            frame_table: frame_table,
+            frame_table,
             hand: 0,
-            num_frames: num_frames,
+            num_frames,
         }
     }
 }
 
 impl Pager for FIFO {
-    fn select_victim_frame(&mut self, instr_idx: usize) -> usize {
+    fn select_victim_frame(&mut self, _instr_idx: usize) -> usize {
         let frame = self.hand;
         self.hand = (self.hand + 1) % self.num_frames;
         frame
@@ -245,16 +245,16 @@ impl Random {
     fn new(frame_table: Rc<RefCell<Vec<Option<Frame>>>>, random_numbers: Vec<usize>) -> Random {
         let num_frames = frame_table.borrow().len();
         Random {
-            frame_table: frame_table,
+            frame_table,
             hand: 0,
-            num_frames: num_frames,
-            random_numbers: random_numbers,
+            num_frames,
+            random_numbers,
         }
     }
 }
 
 impl Pager for Random {
-    fn select_victim_frame(&mut self, instr_idx: usize) -> usize {
+    fn select_victim_frame(&mut self, _instr_idx: usize) -> usize {
         let frame = self.random_numbers[self.hand] % self.num_frames;
         self.hand = (self.hand + 1) % self.random_numbers.len();
         frame
@@ -275,16 +275,16 @@ impl Clock {
     ) -> Clock {
         let num_frames = frame_table.borrow().len();
         Clock {
-            frame_table: frame_table,
-            processes: processes,
+            frame_table,
+            processes,
             hand: 0,
-            num_frames: num_frames,
+            num_frames,
         }
     }
 }
 
 impl Pager for Clock {
-    fn select_victim_frame(&mut self, instr_idx: usize) -> usize {
+    fn select_victim_frame(&mut self, _instr_idx: usize) -> usize {
         let mut frame_idx = self.hand;
         let old_hand = self.hand;
         loop {
@@ -327,10 +327,10 @@ impl NRU {
     ) -> NRU {
         let num_frames = frame_table.borrow().len();
         NRU {
-            frame_table: frame_table,
-            processes: processes,
+            frame_table,
+            processes,
             hand: 0,
-            num_frames: num_frames,
+            num_frames,
             instr_ckpt: 0,
         }
     }
@@ -423,10 +423,10 @@ impl MMU {
         processes: Rc<RefCell<Vec<Process>>>,
     ) -> MMU {
         MMU {
-            frame_table: frame_table,
-            free_frames: free_frames,
-            pager: pager,
-            processes: processes,
+            frame_table,
+            free_frames,
+            pager,
+            processes,
             current_process: None,
             ctx_switches: 0,
             process_exits: 0,
@@ -471,7 +471,7 @@ impl MMU {
         frame_idx
     }
 
-    fn page_fault_handler(&mut self, vpage: usize) {}
+    fn page_fault_handler(&mut self, _vpage: usize) {}
 
     fn process_instruction(&mut self, idx: usize, operation: &str, argument: usize) {
         match operation {
@@ -515,7 +515,7 @@ impl MMU {
                     let mut frame_table = self.frame_table.borrow_mut();
                     frame_table[frame_idx] = Some(Frame {
                         pid: self.current_process.unwrap() as u64,
-                        vpage: vpage,
+                        vpage,
                     });
 
                     // 4. populate it -
@@ -651,7 +651,6 @@ fn read_input_file(filename: &str) -> (Vec<Process>, Vec<(String, usize)>) {
         for _ in 0..num_vmas {
             reader.read_line(&mut line).expect("Failed to read line");
             let mut iter = line
-                .trim()
                 .split_whitespace()
                 .map(|x| x.parse::<usize>().expect("Failed to parse number"));
             let start = iter.next().unwrap();
@@ -677,7 +676,7 @@ fn read_input_file(filename: &str) -> (Vec<Process>, Vec<(String, usize)>) {
         if line.starts_with('#') {
             break;
         }
-        let mut iter = line.trim().split_whitespace();
+        let mut iter = line.split_whitespace();
         let operation = iter.next().unwrap().to_string();
         let address: usize = iter
             .next()
@@ -692,7 +691,7 @@ fn read_input_file(filename: &str) -> (Vec<Process>, Vec<(String, usize)>) {
 }
 fn actual_main_fn(num_frames: usize, algorithm: &str, inputfile: &str, randomfile: &str) {
     // Read input file
-    let (processes, instructions) = read_input_file(&inputfile);
+    let (processes, instructions) = read_input_file(inputfile);
 
     let frame_table: Rc<RefCell<Vec<Option<Frame>>>> =
         Rc::new(RefCell::new(vec![None; num_frames]));
@@ -709,7 +708,7 @@ fn actual_main_fn(num_frames: usize, algorithm: &str, inputfile: &str, randomfil
     let pager = match algorithm {
         "f" => Box::new(FIFO::new(frame_table.clone())) as Box<dyn Pager>,
         "r" => {
-            let random_numbers = read_random_file(&randomfile);
+            let random_numbers = read_random_file(randomfile);
             // println!("Random numbers: {:?}", random_numbers);
             Box::new(Random::new(frame_table.clone(), random_numbers))
         }
@@ -723,7 +722,7 @@ fn actual_main_fn(num_frames: usize, algorithm: &str, inputfile: &str, randomfil
     // let mut mmu = MMU::new(frame_table, free_frames, pager, processes);
     let mut mmu = MMU::new(
         frame_table.clone(),
-        free_frames.clone(),
+        free_frames,
         pager,
         processes.clone(),
     );
@@ -783,7 +782,7 @@ fn actual_main_fn(num_frames: usize, algorithm: &str, inputfile: &str, randomfil
     }
     cost += mmu.ctx_switches * 130;
     cost += mmu.process_exits * 1230;
-    cost += (instructions.len() as u64 - mmu.process_exits - mmu.ctx_switches) * 1;
+    cost += instructions.len() as u64 - mmu.process_exits - mmu.ctx_switches;
 
     println!(
         "TOTALCOST {} {} {} {} {}",
@@ -883,7 +882,7 @@ fn main() {
     let actual_args = if args.len() > 1 { &args } else { &default_args };
 
     // Parse command line arguments
-    let (num_frames, algorithm, inputfile, randomfile) = parse_args(&actual_args);
+    let (num_frames, algorithm, inputfile, randomfile) = parse_args(actual_args);
 
     // Call your main function with the parsed arguments
     actual_main_fn(num_frames, &algorithm, &inputfile, &randomfile);
