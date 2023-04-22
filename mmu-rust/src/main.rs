@@ -885,11 +885,6 @@ fn main() {
     // Parse command line arguments
     let (num_frames, algorithm, inputfile, randomfile) = parse_args(&actual_args);
 
-    // log the arguments
-    // println!("ARG num_frames: {}", num_frames);
-    // println!("ARG algorithm: {}", algorithm);
-    // println!("ARG inputfile: {}", inputfile);
-    // println!("ARG randomfile: {}", randomfile);
     // Call your main function with the parsed arguments
     actual_main_fn(num_frames, &algorithm, &inputfile, &randomfile);
 }
