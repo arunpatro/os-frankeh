@@ -202,7 +202,7 @@ impl Process {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct Frame {
     pid: u64,
     vpage: usize,
@@ -210,6 +210,7 @@ struct Frame {
 }
 
 trait Pager {
+    fn update_age(&mut self, frame: usize) {}
     fn select_victim_frame(&mut self, instr_idx: usize) -> usize;
 }
 
@@ -406,6 +407,87 @@ impl Pager for NRU {
     }
 }
 
+struct Aging {
+    frame_table: Rc<RefCell<Vec<Option<Frame>>>>,
+    processes: Rc<RefCell<Vec<Process>>>,
+    hand: usize,
+    num_frames: usize,
+}
+
+impl Aging {
+    fn new(
+        frame_table: Rc<RefCell<Vec<Option<Frame>>>>,
+        processes: Rc<RefCell<Vec<Process>>>,
+    ) -> Aging {
+        let num_frames = frame_table.borrow().len();
+        Aging {
+            frame_table,
+            processes,
+            hand: 0,
+            num_frames,
+        }
+    }
+}
+
+impl Pager for Aging {
+    fn select_victim_frame(&mut self, instr_idx: usize) -> usize {
+        let mut frame_idx = self.hand;
+        let old_hand = self.hand;
+        let mut lowest_age = None;
+        let mut lowest_age_frame = 0;
+
+        let mut frame_string = String::new(); // Initialize with empty string
+
+        loop {
+            let (pid, vpage, age);
+            {
+                let mut frame_table = self.frame_table.borrow_mut();
+                let frame = frame_table[frame_idx % self.num_frames].as_mut().unwrap();
+                pid = frame.pid;
+                vpage = frame.vpage;
+                frame.age >>= 1;
+                // Set MSB to 1 if referenced
+                let page = &mut self.processes.borrow_mut()[pid as usize].page_table.entries[vpage];
+                if page.referenced {
+                    frame.age |= 0x80000000;
+                }
+                age = frame.age;
+
+                // add the age to the frame string by appending
+                frame_string.push_str(&format!("{}:{:x} ", frame_idx % self.num_frames, frame.age));
+            }
+
+            if let Some(current_lowest_age) = lowest_age {
+                if age < current_lowest_age {
+                    lowest_age = Some(age);
+                    lowest_age_frame = frame_idx % self.num_frames;
+                }
+            } else {
+                lowest_age = Some(age);
+                lowest_age_frame = frame_idx % self.num_frames;
+            }
+            self.processes.borrow_mut()[pid as usize].page_table.entries[vpage].referenced = false;
+
+            // One cycle through the frame table and no empty classes
+            if frame_idx - old_hand == self.num_frames - 1 {
+                break;
+            }
+
+            frame_idx += 1;
+        }
+
+        a_trace!(
+            "ASELECT {}-{} | {}| {}",
+            old_hand,
+            frame_idx % self.num_frames,
+            frame_string,
+            lowest_age_frame
+        );
+
+        self.hand = (lowest_age_frame + 1) % self.num_frames;
+        lowest_age_frame
+    }
+}
 
 struct MMU {
     frame_table: Rc<RefCell<Vec<Option<Frame>>>>,
@@ -447,7 +529,8 @@ impl MMU {
         }
 
         let frame_idx = self.pager.select_victim_frame(instr_idx);
-        let frame = self.frame_table.borrow()[frame_idx].unwrap();
+        let frame_table = self.frame_table.borrow();
+        let frame = &frame_table[frame_idx].as_ref().unwrap();
         // destructure frame to pid and vpage
         let (pid, vpage) = (frame.pid, frame.vpage);
 
@@ -487,7 +570,7 @@ impl MMU {
             if vma.is_none() {
                 println!(" SEGV");
                 proc.segv += 1;
-                return Err("segv")
+                return Err("segv");
             }
         }
 
@@ -627,7 +710,7 @@ fn actual_main_fn(num_frames: usize, algorithm: &str, inputfile: &str, randomfil
         "c" => Box::new(Clock::new(frame_table.clone(), processes.clone())) as Box<dyn Pager>,
 
         "e" => Box::new(NRU::new(frame_table.clone(), processes.clone())) as Box<dyn Pager>,
-        // "a" => Box::new(Aging::new(frame_table.clone(), processes.clone())) as Box<dyn Pager>,
+        "a" => Box::new(Aging::new(frame_table.clone(), processes.clone())) as Box<dyn Pager>,
         _ => panic!("Invalid algorithm: {}", algorithm),
     };
 
