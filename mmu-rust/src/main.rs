@@ -210,7 +210,9 @@ struct Frame {
 }
 
 trait Pager {
-    fn update_age(&mut self, frame: usize) {}
+    fn update_age(&mut self, instr_idx: usize) -> u32 {
+        0
+    }
     fn select_victim_frame(&mut self, instr_idx: usize) -> usize;
 }
 
@@ -513,6 +515,9 @@ impl WorkingSet {
 }
 
 impl Pager for WorkingSet {
+    fn update_age(&mut self, instr_idx: usize) -> u32 {
+        instr_idx as u32
+    }
     fn select_victim_frame(&mut self, instr_idx: usize) -> usize {
         let mut frame_idx = self.hand;
         let old_hand = self.hand;
@@ -548,7 +553,6 @@ impl Pager for WorkingSet {
                     frame_string.push_str(&format!(" STOP({})", frame_idx - old_hand + 1));
                     break;
                 }
-
 
                 if frame.age < earliest_use_time {
                     earliest_use_time = frame.age;
@@ -673,8 +677,7 @@ impl MMU {
         frame_table[frame_idx] = Some(Frame {
             pid: self.current_process.unwrap() as u64,
             vpage,
-            age: idx as u32,
-            // age: 0,
+            age: self.pager.update_age(idx) // age: 0,
         });
 
         // 4. populate it -
