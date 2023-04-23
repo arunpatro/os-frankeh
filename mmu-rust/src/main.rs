@@ -1,9 +1,10 @@
 use clap::{App, Arg};
 use std::cell::RefCell;
+use std::cmp::min;
 use std::collections::VecDeque;
-use std::fs::File;
-use std::io::{BufRead, BufReader};
 use std::rc::Rc;
+mod utils;
+use utils::{read_input_file, read_random_file};
 
 // Define a struct to hold the flags
 #[derive(Debug, Default)]
@@ -100,6 +101,7 @@ macro_rules! x_trace {
     };
 }
 
+#[macro_export]
 macro_rules! a_trace {
     ($($arg:tt)*) => {
         TFLAGS.with(|tflags| {
@@ -144,7 +146,7 @@ struct PageTable {
     entries: Vec<PTE>,
 }
 
-struct Process {
+pub struct Process {
     vmas: Vec<VMA>,
     page_table: PageTable,
 
@@ -204,6 +206,7 @@ impl Process {
 struct Frame {
     pid: u64,
     vpage: usize,
+    age: u32,
 }
 
 trait Pager {
@@ -403,6 +406,7 @@ impl Pager for NRU {
     }
 }
 
+
 struct MMU {
     frame_table: Rc<RefCell<Vec<Option<Frame>>>>,
     free_frames: Rc<RefCell<VecDeque<usize>>>,
@@ -471,7 +475,58 @@ impl MMU {
         frame_idx
     }
 
-    fn page_fault_handler(&mut self, _vpage: usize) {}
+    // return Err("segv") if segv, else return Ok(())
+    fn page_fault_handler(&mut self, vpage: usize, idx: usize) -> Result<(), &'static str> {
+        // 1. check if page can be accessed i.e. it is in the vma, if not then segv and move on
+        {
+            let proc = &mut self.processes.borrow_mut()[self.current_process.unwrap()];
+            let vma = proc
+                .vmas
+                .iter()
+                .find(|vma| vma.start <= vpage && vpage <= vma.end);
+            if vma.is_none() {
+                println!(" SEGV");
+                proc.segv += 1;
+                return Err("segv")
+            }
+        }
+
+        // 3. if valid then assign a frame
+        let frame_idx = self.get_frame(idx);
+        let proc = &mut self.processes.borrow_mut()[self.current_process.unwrap()];
+        let page = &mut proc.page_table.entries[vpage];
+        page.present = true;
+        page.frame = Some(frame_idx);
+
+        let mut frame_table = self.frame_table.borrow_mut();
+        frame_table[frame_idx] = Some(Frame {
+            pid: self.current_process.unwrap() as u64,
+            vpage,
+            age: 0,
+        });
+
+        // 4. populate it -
+        //    if paged out then we need bring it "IN" from swap space
+        //    or "FIN" if it is memory mapped ?? what is this?
+        //    else zero it
+
+        if page.file_mapped {
+            println!(" FIN");
+            proc.fins += 1;
+        } else if page.paged_out {
+            println!(" IN");
+            proc.ins += 1;
+        } else {
+            println!(" ZERO");
+            proc.zeros += 1;
+        }
+        println!(" MAP {}", frame_idx);
+        proc.maps += 1;
+
+        page.referenced = true;
+
+        Ok(())
+    }
 
     fn process_instruction(&mut self, idx: usize, operation: &str, argument: usize) {
         match operation {
@@ -480,80 +535,6 @@ impl MMU {
                 self.current_process = Some(pid);
                 self.ctx_switches += 1;
                 return; // to avoid trace
-            }
-            "r" | "w" => {
-                let vpage = argument;
-                if !self.processes.borrow_mut()[self.current_process.unwrap()]
-                    .page_table
-                    .entries[vpage]
-                    .present
-                {
-                    // TODO page fault so call the page fault handler
-                    // self.page_fault_handler(vpage);
-
-                    // 1. check if page can be accessed i.e. it is in the vma, if not then segv and move on
-                    {
-                        let proc = &mut self.processes.borrow_mut()[self.current_process.unwrap()];
-                        let vma = proc
-                            .vmas
-                            .iter()
-                            .find(|vma| vma.start <= vpage && vpage <= vma.end);
-                        if vma.is_none() {
-                            println!(" SEGV");
-                            proc.segv += 1;
-                            return;
-                        }
-                    }
-
-                    // 3. if valid then assign a frame
-                    let frame_idx = self.get_frame(idx);
-                    let proc = &mut self.processes.borrow_mut()[self.current_process.unwrap()];
-                    let page = &mut proc.page_table.entries[vpage];
-                    page.present = true;
-                    page.frame = Some(frame_idx);
-
-                    let mut frame_table = self.frame_table.borrow_mut();
-                    frame_table[frame_idx] = Some(Frame {
-                        pid: self.current_process.unwrap() as u64,
-                        vpage,
-                    });
-
-                    // 4. populate it -
-                    //    if paged out then we need bring it "IN" from swap space
-                    //    or "FIN" if it is memory mapped ?? what is this?
-                    //    else zero it
-
-                    if page.file_mapped {
-                        println!(" FIN");
-                        proc.fins += 1;
-                    } else if page.paged_out {
-                        println!(" IN");
-                        proc.ins += 1;
-                    } else {
-                        println!(" ZERO");
-                        proc.zeros += 1;
-                    }
-                    println!(" MAP {}", frame_idx);
-                    proc.maps += 1;
-
-                    page.referenced = true;
-                }
-
-                // finally update the reference and modified bits
-                if let Some(current_process) = self.current_process {
-                    let proc = &mut self.processes.borrow_mut()[current_process];
-                    let page = &mut proc.page_table.entries[vpage];
-                    page.referenced = true;
-
-                    if operation == "w" {
-                        if page.write_protected {
-                            println!(" SEGPROT");
-                            proc.segprot += 1;
-                        } else {
-                            page.modified = true;
-                        }
-                    }
-                }
             }
             "e" => {
                 let pid = argument;
@@ -581,114 +562,45 @@ impl MMU {
                 }
                 return; // to avoid trace
             }
+            "r" | "w" => {
+                let vpage = argument;
+                if !self.processes.borrow_mut()[self.current_process.unwrap()]
+                    .page_table
+                    .entries[vpage]
+                    .present
+                {
+                    // TODO page fault so call the page fault handler
+                    if self.page_fault_handler(vpage, idx).is_err() {
+                        return;
+                    }
+                }
+
+                // now the page is definitely present
+                // check write protection
+                // simulate instruction execution by hardware by updating the R/M PTE bits
+                // finally update the reference and modified bits
+                if let Some(current_process) = self.current_process {
+                    let proc = &mut self.processes.borrow_mut()[current_process];
+                    let page = &mut proc.page_table.entries[vpage];
+                    page.referenced = true;
+
+                    if operation == "w" {
+                        if page.write_protected {
+                            println!(" SEGPROT");
+                            proc.segprot += 1;
+                        } else {
+                            page.modified = true;
+                        }
+                    }
+                }
+            }
             _ => panic!("Invalid operation: {}", operation),
         }
         x_trace!(self.processes.clone(), self.current_process.unwrap());
         f_trace!(self.frame_table.clone());
     }
 }
-fn read_random_file(filename: &str) -> Vec<usize> {
-    // The format is: the 1st line is the number of random numbers, and the rest are the numbers
-    let file = File::open(filename).expect("Failed to open file");
-    let reader = BufReader::new(file);
 
-    let mut lines = reader.lines();
-    let count: usize = lines
-        .next()
-        .expect("Failed to read the first line")
-        .expect("Failed to read the first line")
-        .trim()
-        .parse()
-        .expect("Failed to parse the number of random numbers");
-
-    let mut random_numbers = Vec::with_capacity(count);
-    for line in lines {
-        let number: usize = line
-            .expect("Failed to read a line")
-            .trim()
-            .parse()
-            .expect("Failed to parse a random number");
-        random_numbers.push(number);
-    }
-
-    random_numbers
-}
-
-fn read_input_file(filename: &str) -> (Vec<Process>, Vec<(String, usize)>) {
-    let file = File::open(filename).expect("Failed to open file");
-    let mut reader = BufReader::new(file);
-
-    let mut line = String::new();
-
-    // Skip the first 3 comment lines
-    for _ in 0..3 {
-        reader.read_line(&mut line).expect("Failed to read line");
-        line.clear();
-    }
-
-    // Read the number of processes
-    reader.read_line(&mut line).expect("Failed to read line");
-    let num_processes: usize = line.trim().parse().expect("Failed to parse number");
-    line.clear();
-
-    // Read processes
-    let mut processes = Vec::new();
-    for _ in 0..num_processes {
-        // Skip comment lines
-        while {
-            reader.read_line(&mut line).expect("Failed to read line");
-            line.starts_with('#')
-        } {
-            line.clear();
-        }
-
-        // Read the number of VMAs
-        let num_vmas: usize = line.trim().parse().expect("Failed to parse number");
-        line.clear();
-
-        // Read VMAs
-        let mut vmas = Vec::new();
-        for _ in 0..num_vmas {
-            reader.read_line(&mut line).expect("Failed to read line");
-            let mut iter = line
-                .split_whitespace()
-                .map(|x| x.parse::<usize>().expect("Failed to parse number"));
-            let start = iter.next().unwrap();
-            let end = iter.next().unwrap();
-            let wprot = iter.next().unwrap() == 1;
-            let mmap = iter.next().unwrap() == 1;
-
-            vmas.push(VMA::new(start, end, wprot, mmap));
-            line.clear();
-        }
-
-        // Create a new Process with the VMAs and add it to the processes list
-        processes.push(Process::new(vmas));
-    }
-
-    // Skip comment lines
-    reader.read_line(&mut line).expect("Failed to read line");
-    line.clear();
-
-    // Read instructions
-    let mut instructions = Vec::new();
-    while reader.read_line(&mut line).expect("Failed to read line") > 0 {
-        if line.starts_with('#') {
-            break;
-        }
-        let mut iter = line.split_whitespace();
-        let operation = iter.next().unwrap().to_string();
-        let address: usize = iter
-            .next()
-            .unwrap()
-            .parse()
-            .expect("Failed to parse number");
-        instructions.push((operation, address));
-        line.clear();
-    }
-
-    (processes, instructions)
-}
 fn actual_main_fn(num_frames: usize, algorithm: &str, inputfile: &str, randomfile: &str) {
     // Read input file
     let (processes, instructions) = read_input_file(inputfile);
@@ -715,17 +627,12 @@ fn actual_main_fn(num_frames: usize, algorithm: &str, inputfile: &str, randomfil
         "c" => Box::new(Clock::new(frame_table.clone(), processes.clone())) as Box<dyn Pager>,
 
         "e" => Box::new(NRU::new(frame_table.clone(), processes.clone())) as Box<dyn Pager>,
-        // "a" => Pager::Aging,
+        // "a" => Box::new(Aging::new(frame_table.clone(), processes.clone())) as Box<dyn Pager>,
         _ => panic!("Invalid algorithm: {}", algorithm),
     };
 
     // let mut mmu = MMU::new(frame_table, free_frames, pager, processes);
-    let mut mmu = MMU::new(
-        frame_table.clone(),
-        free_frames,
-        pager,
-        processes.clone(),
-    );
+    let mut mmu = MMU::new(frame_table.clone(), free_frames, pager, processes.clone());
     for (idx, (operation, address)) in instructions.iter().cloned().enumerate() {
         O_trace!(idx, operation, address);
         mmu.process_instruction(idx, &operation, address);
@@ -869,9 +776,9 @@ fn get_default_args() -> Vec<String> {
     vec![
         "mmu-rust".to_string(),
         "-f16".to_string(),
-        "-ae".to_string(),
+        "-aa".to_string(),
         "-oOPFSafx".to_string(),
-        "../mmu/lab3_assign/in4".to_string(),
+        "../mmu/lab3_assign/in3".to_string(),
         "../mmu/lab3_assign/rfile".to_string(),
     ]
 }
