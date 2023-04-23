@@ -377,7 +377,6 @@ impl Pager for NRU {
                 break;
             }
 
-            // TODO
             // one cycle through the frame table and no empty classes
             if frame_idx - old_hand == self.num_frames - 1 {
                 break;
@@ -468,7 +467,7 @@ impl Pager for Aging {
             }
             self.processes.borrow_mut()[pid as usize].page_table.entries[vpage].referenced = false;
 
-            // One cycle through the frame table and no empty classes
+            // One cycle through the frame table
             if frame_idx - old_hand == self.num_frames - 1 {
                 break;
             }
@@ -489,6 +488,94 @@ impl Pager for Aging {
     }
 }
 
+struct WorkingSet {
+    frame_table: Rc<RefCell<Vec<Option<Frame>>>>,
+    processes: Rc<RefCell<Vec<Process>>>,
+    hand: usize,
+    num_frames: usize,
+    tau: usize,
+}
+
+impl WorkingSet {
+    fn new(
+        frame_table: Rc<RefCell<Vec<Option<Frame>>>>,
+        processes: Rc<RefCell<Vec<Process>>>,
+    ) -> WorkingSet {
+        let num_frames = frame_table.borrow().len();
+        WorkingSet {
+            frame_table,
+            processes,
+            hand: 0,
+            num_frames,
+            tau: 50,
+        }
+    }
+}
+
+impl Pager for WorkingSet {
+    fn select_victim_frame(&mut self, instr_idx: usize) -> usize {
+        let mut frame_idx = self.hand;
+        let old_hand = self.hand;
+        let mut earliest_use_time = instr_idx as u32;
+        let mut earliest_use_frame = 0;
+        let mut frame_string = String::new(); // Initialize with empty string
+
+        loop {
+            let (pid, vpage);
+            {
+                let mut frame_table = self.frame_table.borrow_mut();
+                let frame = frame_table[frame_idx % self.num_frames].as_mut().unwrap();
+                pid = frame.pid;
+                vpage = frame.vpage;
+                let page = &mut self.processes.borrow_mut()[pid as usize].page_table.entries[vpage];
+
+                // update earliest use time and frame
+                frame_string.push_str(&format!(
+                    " {}({} {}:{} {})",
+                    frame_idx % self.num_frames,
+                    page.referenced as u8,
+                    pid,
+                    vpage,
+                    frame.age
+                ));
+
+                if page.referenced {
+                    page.referenced = false;
+                    frame.age = instr_idx as u32; // reset age as last time checked
+                } else if instr_idx - frame.age as usize >= self.tau {
+                    earliest_use_time = frame.age;
+                    earliest_use_frame = frame_idx % self.num_frames;
+                    frame_string.push_str(&format!(" STOP({})", frame_idx - old_hand + 1));
+                    break;
+                }
+
+
+                if frame.age < earliest_use_time {
+                    earliest_use_time = frame.age;
+                    earliest_use_frame = frame_idx % self.num_frames;
+                }
+            }
+            // One cycle through the frame table
+            if frame_idx - old_hand == self.num_frames - 1 {
+                break;
+            }
+
+            frame_idx += 1;
+        }
+
+        a_trace!(
+            "ASELECT {}-{} |{} | {}",
+            old_hand,
+            (old_hand as i32 - 1) as usize % self.num_frames,
+            frame_string,
+            earliest_use_frame
+        );
+
+        // return the frame with the earliest use time
+        self.hand = (earliest_use_frame + 1) % self.num_frames;
+        earliest_use_frame
+    }
+}
 struct MMU {
     frame_table: Rc<RefCell<Vec<Option<Frame>>>>,
     free_frames: Rc<RefCell<VecDeque<usize>>>,
@@ -581,11 +668,13 @@ impl MMU {
         page.present = true;
         page.frame = Some(frame_idx);
 
+        // TODO use the update_age method of the pagers to do this
         let mut frame_table = self.frame_table.borrow_mut();
         frame_table[frame_idx] = Some(Frame {
             pid: self.current_process.unwrap() as u64,
             vpage,
-            age: 0,
+            age: idx as u32,
+            // age: 0,
         });
 
         // 4. populate it -
@@ -652,7 +741,6 @@ impl MMU {
                     .entries[vpage]
                     .present
                 {
-                    // TODO page fault so call the page fault handler
                     if self.page_fault_handler(vpage, idx).is_err() {
                         return;
                     }
@@ -711,6 +799,7 @@ fn actual_main_fn(num_frames: usize, algorithm: &str, inputfile: &str, randomfil
 
         "e" => Box::new(NRU::new(frame_table.clone(), processes.clone())) as Box<dyn Pager>,
         "a" => Box::new(Aging::new(frame_table.clone(), processes.clone())) as Box<dyn Pager>,
+        "w" => Box::new(WorkingSet::new(frame_table.clone(), processes.clone())) as Box<dyn Pager>,
         _ => panic!("Invalid algorithm: {}", algorithm),
     };
 
@@ -858,10 +947,10 @@ fn parse_args(actual_args: &Vec<String>) -> (usize, String, String, String) {
 fn get_default_args() -> Vec<String> {
     vec![
         "mmu-rust".to_string(),
-        "-f16".to_string(),
-        "-aa".to_string(),
+        "-f32".to_string(),
+        "-aw".to_string(),
         "-oOPFSafx".to_string(),
-        "../mmu/lab3_assign/in3".to_string(),
+        "../mmu/lab3_assign/in11".to_string(),
         "../mmu/lab3_assign/rfile".to_string(),
     ]
 }
