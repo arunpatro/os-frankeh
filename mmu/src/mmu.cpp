@@ -139,22 +139,22 @@ struct Process {
 int n_frames;
 uint32_t instruction_idx = 0;
 frame_t frame_table[MAX_FRAMES];
-std::queue<int> free_frame_list;
+std::queue<uint16_t> free_frame_list;
 std::vector<Process *> processes;
 std::vector<std::pair<char, int> > instructions;
 std::vector<uint32_t> random_numbers;
 
 class Pager {
    public:
-    uint32_t hand = 0;
-    virtual int select_victim_frame() = 0;
+    uint16_t hand = 0;
+    virtual uint16_t select_victim_frame() = 0;
     virtual void update_age(frame_t *frame) { ; };
 };
 
 class FIFO : public Pager {
    public:
-    int select_victim_frame() override {
-        int frame = hand;
+    uint16_t select_victim_frame() override {
+        uint16_t frame = hand;
         a_trace("ASELECT %d", frame % n_frames);
         hand = (hand + 1) % n_frames;
         return frame;
@@ -162,9 +162,9 @@ class FIFO : public Pager {
 };
 class Random : public Pager {
    public:
-    int select_victim_frame() override {
-        int frame = random_numbers[hand] % n_frames;
-        a_trace("ASELECT %d", frame);
+    uint16_t select_victim_frame() override {
+        uint16_t frame = random_numbers[hand] % n_frames;
+        // a_trace("ASELECT %d", frame); // random pager doesn't implement a_trace
         hand = (hand + 1) % random_numbers.size();
         return frame;
     }
@@ -172,8 +172,8 @@ class Random : public Pager {
 
 class Clock : public Pager {
    public:
-    int select_victim_frame() override {
-        int i = hand;
+    uint16_t select_victim_frame() override {
+        uint16_t i = hand;
         while (true) {
             frame_t *frame = &frame_table[i % n_frames];
             pte_t *pte = &processes[frame->pid]
@@ -192,9 +192,9 @@ class Clock : public Pager {
 
 class NRU : public Pager {
    public:
-    uint64_t instruction_ckpt = 0;
-    int select_victim_frame() override {
-        uint32_t i = hand;
+    uint32_t instruction_ckpt = 0;
+    uint16_t select_victim_frame() override {
+        uint16_t i = hand;
         int reset = 0;
         int class_ = -1;
         int classes[4] = {-1, -1, -1, -1};
@@ -227,7 +227,7 @@ class NRU : public Pager {
 
         for (int j = 0; j < 4; j++) {
             if (classes[j] > -1) {
-                a_trace("ASELECT: hand=%d %d | %d %2d %2d", hand, reset, j,
+                a_trace("ASELECT: hand=%2d %d | %d %2d %2d", hand, reset, j,
                         classes[j], i - hand + 1);
                 hand = (classes[j] + 1) % n_frames;
                 return classes[j];
@@ -239,8 +239,8 @@ class NRU : public Pager {
 class Aging : public Pager {
    public:
     void update_age(frame_t *frame) override { frame->age = 0; }
-    int select_victim_frame() override {
-        uint32_t i = hand;
+    uint16_t select_victim_frame() override {
+        uint16_t i = hand;
         uint32_t min_age = 0xffffffff;
         int min_age_frame = -1;
         std::string frame_str = "";
@@ -281,12 +281,12 @@ class Aging : public Pager {
 
 class WorkingSet : public Pager {
    public:
-    const int tau = 50;
+    const uint16_t tau = 50;
     void update_age(frame_t *frame) override { frame->age = instruction_idx; }
-    int select_victim_frame() override {
-        uint32_t i = hand;
+    uint16_t select_victim_frame() override {
+        uint16_t i = hand;
         uint32_t min_age = instruction_idx;
-        int min_age_frame = hand;
+        uint16_t min_age_frame = hand;
         std::string frame_str = "";
         char buffer[100];
         while (true) {
@@ -400,16 +400,16 @@ class Simulator {
         }
     }
 
-    int get_frame() {
+    uint16_t get_frame() {
         // if there is a free frame, return it
         if (!free_frame_list.empty()) {
-            uint8_t frame_idx = free_frame_list.front();
+            uint16_t frame_idx = free_frame_list.front();
             free_frame_list.pop();
             return frame_idx;
         }
 
         // otherwise, select a victim frame
-        int victim_frame_idx = pager->select_victim_frame();
+        uint16_t victim_frame_idx = pager->select_victim_frame();
         frame_t *victim_frame = &frame_table[victim_frame_idx];
         Process *victim_process = processes[victim_frame->pid];
         pte_t *victim_pte = &victim_process->page_table
@@ -435,7 +435,7 @@ class Simulator {
         return victim_frame_idx;
     }
 
-    int page_fault_handler(int virtual_page_number) {
+    int page_fault_handler(uint16_t virtual_page_number) {
         Process *current_process = processes[current_pid];
         pte_t *pte = &current_process->page_table.entries[virtual_page_number];
 
@@ -459,7 +459,7 @@ class Simulator {
         }
 
         // all valid get a free frame
-        uint8_t frame_idx = get_frame();
+        uint16_t frame_idx = get_frame();
         frame_t *frame = &frame_table[frame_idx];
 
         // initialize the page table entry
