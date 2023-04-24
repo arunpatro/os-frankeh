@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 
+#include <cstddef>
 #include <fstream>
 #include <iostream>
 #include <queue>
@@ -95,14 +96,15 @@ typedef struct {
 } frame_t;
 
 typedef struct {
-    int frame_number;
-    bool valid;
-    bool referenced;
-    bool modified;
-    bool paged_out;
-    bool write_protected;
-    bool file_mapped;
-    bool is_valid_vma;
+    unsigned frame_number : 7;
+    unsigned valid : 1;
+    unsigned referenced : 1;
+    unsigned modified : 1;
+    unsigned paged_out : 1;
+    unsigned write_protected : 1;
+    unsigned file_mapped : 1;
+    unsigned is_valid_vma : 1;
+    unsigned other : 17;
 } pte_t;
 
 struct PageTable {
@@ -186,6 +188,7 @@ class Clock : public Pager {
         }
     }
 };
+
 class NRU : public Pager {
    public:
     uint64_t instruction_ckpt = 0;
@@ -399,7 +402,7 @@ class Simulator {
     int get_frame() {
         // if there is a free frame, return it
         if (!free_frame_list.empty()) {
-            int frame_idx = free_frame_list.front();
+            uint8_t frame_idx = free_frame_list.front();
             free_frame_list.pop();
             return frame_idx;
         }
@@ -455,7 +458,7 @@ class Simulator {
         }
 
         // all valid get a free frame
-        int frame_idx = get_frame();
+        uint8_t frame_idx = get_frame();
         frame_t *frame = &frame_table[frame_idx];
 
         // initialize the page table entry
@@ -570,7 +573,7 @@ class Simulator {
             cost += ctx_switches * 130 + process_exits * 1230 +
                     instructions.size() - process_exits - ctx_switches;
             printf("TOTALCOST %lu %llu %llu %llu %lu\n", instructions.size(),
-                   ctx_switches, process_exits, cost, 4);
+                   ctx_switches, process_exits, cost, sizeof(pte_t));
         }
     }
 };
@@ -640,8 +643,6 @@ void read_input_file(const std::string &filename) {
 }
 
 int main(int argc, char *argv[]) {
-    // string usage = "./mmu –f<num_frames> -a<algo>
-    // [-o<options>] inputfile randomfile";
     int c;
     char alg;
     Pager *pager;
