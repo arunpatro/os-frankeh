@@ -134,16 +134,16 @@ struct Process {
 
 // global variables
 int n_frames;
-uint64_t intruction_idx = 0;
+uint32_t instruction_idx = 0;
 frame_t frame_table[MAX_FRAMES];
 std::queue<int> free_frame_list;
 std::vector<Process *> processes;
 std::vector<std::pair<char, int> > instructions;
-std::vector<uint64_t> random_numbers;
+std::vector<uint32_t> random_numbers;
 
 class Pager {
    public:
-    uint16_t hand = 0;
+    uint32_t hand = 0;
     virtual int select_victim_frame() = 0;
     virtual void update_age(frame_t *frame) { ; };
 };
@@ -190,13 +190,13 @@ class NRU : public Pager {
    public:
     uint64_t instruction_ckpt = 0;
     int select_victim_frame() override {
-        int i = hand;
+        uint16_t i = hand;
         int reset = 0;
         int class_ = -1;
         int classes[4] = {-1, -1, -1, -1};
-        if (intruction_idx - instruction_ckpt + 1 >= 50) {
+        if (instruction_idx - instruction_ckpt + 1 >= 50) {
             reset = 1;
-            instruction_ckpt = intruction_idx + 1;
+            instruction_ckpt = instruction_idx + 1;
         }
         while (true) {
             frame_t *frame = &frame_table[i % n_frames];
@@ -234,8 +234,8 @@ class NRU : public Pager {
 class Aging : public Pager {
    public:
     int select_victim_frame() override {
-        int i = hand;
-        uint64_t min_age = 0;
+        uint32_t i = hand;
+        uint32_t min_age = 0;
         int min_age_frame = -1;
         std::string frame_str = "";
         char hex_string[32];
@@ -249,7 +249,7 @@ class Aging : public Pager {
                 pte->referenced = false;
             }
 
-            snprintf(hex_string, sizeof(hex_string), "%x", frame->age);
+            sprintf(hex_string, "%x", frame->age);
             frame_str += std::to_string(i % n_frames) + ":" +
                          std::string(hex_string) + " ";
 
@@ -272,30 +272,35 @@ class Aging : public Pager {
 class WorkingSet : public Pager {
    public:
     const int tau = 50;
-    void update_age(frame_t *frame) override { frame->age = intruction_idx; }
+    void update_age(frame_t *frame) override { frame->age = instruction_idx; }
     int select_victim_frame() override {
-        int i = hand;
-        int min_age_frame = -1;
-        int min_age = 0;
+        uint32_t i = hand;
+        uint32_t min_age = instruction_idx;
+        int min_age_frame = hand;
         std::string frame_str = "";
-        char buffer[32];
+        char buffer[150];
         while (true) {
             frame_t *frame = &frame_table[i % n_frames];
             pte_t *pte = &processes[frame->pid]
                               ->page_table.entries[frame->virtual_page_number];
-            snprintf(buffer, sizeof(buffer), " %d(%d %d:%d %d)", i % n_frames,
+            sprintf(buffer, " %d(%d %d:%d %d)", i % n_frames,
                      pte->referenced, frame->pid, frame->virtual_page_number,
                      frame->age);
             frame_str += std::string(buffer);
 
             if (pte->referenced) {
                 pte->referenced = false;
-                frame->age = intruction_idx;
-            } else if (intruction_idx - frame->age >= tau) {
+                frame->age = instruction_idx;
+            } else if (instruction_idx - frame->age >= tau) {
                 min_age_frame = i % n_frames;
-                snprintf(buffer, sizeof(buffer), " STOP(%d)", i - hand + 1);
+                sprintf(buffer, " STOP(%lu)", i - hand + 1);
                 frame_str += std::string(buffer);
                 break;
+            }
+
+            if (frame->age < min_age) {
+                min_age = frame->age;
+                min_age_frame = i % n_frames;
             }
 
             if (i - hand == n_frames - 1) {
@@ -303,7 +308,7 @@ class WorkingSet : public Pager {
             }
             i++;
         }
-        a_trace("ASELECT %d-%d | %s| %d", hand, (hand - 1) % n_frames,
+        a_trace("ASELECT %d-%d |%s | %d", hand, (hand + n_frames - 1) % n_frames,
                 frame_str.c_str(), min_age_frame);
         hand = (min_age_frame + 1) % n_frames;
         return min_age_frame;
@@ -452,7 +457,7 @@ class Simulator {
 
         frame->pid = current_pid;
         frame->virtual_page_number = virtual_page_number;
-        // pager->update_age(frame); // TODO need to check what's happening
+        pager->update_age(frame);
 
         if (pte->file_mapped) {
             current_process->fins++;
@@ -472,7 +477,7 @@ class Simulator {
 
     void run() {
         for (int i = 0; i < instructions.size(); i++) {
-            intruction_idx = i;
+            instruction_idx = i;
             char operation = instructions[i].first;
             int value = instructions[i].second;
             // Process *process = processes[value];
