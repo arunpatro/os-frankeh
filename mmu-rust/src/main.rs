@@ -615,10 +615,6 @@ impl MMU {
             return frame;
         }
 
-        thread_local! {
-            static TESTVAL: RefCell<usize> = RefCell::new(0);
-        }
-
         let frame_idx = self.pager.select_victim_frame(instr_idx);
         let frame_table = self.frame_table.borrow();
         let frame = &frame_table[frame_idx].as_ref().unwrap();

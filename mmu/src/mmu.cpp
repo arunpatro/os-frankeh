@@ -121,15 +121,15 @@ struct Process {
     PageTable page_table;
 
     // stats
-    unsigned int unmaps;
-    unsigned int maps;
-    unsigned int ins;
-    unsigned int outs;
-    unsigned int fins;
-    unsigned int fouts;
-    unsigned int zeros;
-    unsigned int segv;
-    unsigned int segprot;
+    uint64_t unmaps;
+    uint64_t maps;
+    uint64_t ins;
+    uint64_t outs;
+    uint64_t fins;
+    uint64_t fouts;
+    uint64_t zeros;
+    uint64_t segv;
+    uint64_t segprot;
 };
 
 // global variables
@@ -151,6 +151,7 @@ class FIFO : public Pager {
     uint16_t hand = 0;
     int select_victim_frame() override {
         int frame = hand;
+        a_trace("ASELECT %d", frame % n_frames);
         hand = (hand + 1) % n_frames;
         return frame;
     }
@@ -207,7 +208,11 @@ std::string page_table_str(int pid) {
 
     for (int i = 0; i < MAX_VPAGES; i++) {
         pte_t *pte = &process->page_table.entries[i];
-        if (pte->valid) {
+        if (pte->paged_out && !pte->valid && !pte->file_mapped) {
+            outstring += " #";
+        } else if (!pte->is_valid_vma || !pte->valid) {
+            outstring += " *";
+        } else {
             outstring += " " + std::to_string(i) + ":";
             if (pte->referenced) {
                 outstring += "R";
@@ -224,12 +229,6 @@ std::string page_table_str(int pid) {
             } else {
                 outstring += "-";
             }
-        } else {
-            if (pte->is_valid_vma) {
-                outstring += " #";
-            } else {
-                outstring += " *";
-            }
         }
     }
 
@@ -244,12 +243,12 @@ class Simulator {
     int instruction;
 
     // stats
-    uint32_t process_exits = 0;
-    uint32_t ctx_switches = 0;
+    uint64_t process_exits = 0;
+    uint64_t ctx_switches = 0;
 
    public:
-    Simulator(Pager *pager, RandGenerator *rand_generator) {
-        pager = pager;
+    Simulator(Pager *pager, RandGenerator rand_generator) {
+        this->pager = pager;
         rand_generator = rand_generator;
 
         // initialize frame table
@@ -275,6 +274,28 @@ class Simulator {
 
         // otherwise, select a victim frame
         int victim_frame_idx = pager->select_victim_frame();
+        frame_t *victim_frame = &frame_table[victim_frame_idx];
+        Process *victim_process = processes[victim_frame->pid];
+        pte_t *victim_pte = &victim_process->page_table
+                                 .entries[victim_frame->virtual_page_number];
+
+        O_trace(" UNMAP %d:%d", victim_frame->pid,
+                victim_frame->virtual_page_number);
+        victim_process->unmaps++;
+
+        victim_pte->valid = false;
+        // victim_pte->referenced = false;
+        if (victim_pte->modified) {
+            victim_pte->modified = false;
+            if (victim_pte->file_mapped) {
+                O_trace(" FOUT");
+                victim_process->fouts++;
+            } else {
+                victim_pte->paged_out = true;
+                O_trace(" OUT");
+                victim_process->outs++;
+            }
+        }
         return victim_frame_idx;
     }
 
@@ -355,7 +376,7 @@ class Simulator {
                 pte->referenced = true;
                 if (operation == 'w') {
                     if (pte->write_protected) {
-                        O_trace("SEGPROT");
+                        O_trace(" SEGPROT");
                         process->segprot++;
                     } else {
                         pte->modified = true;
@@ -364,6 +385,36 @@ class Simulator {
                 x_trace("%s", page_table_str(current_pid).c_str());
                 f_trace("%s", frame_table_str().c_str());
             }
+        }
+
+        // print summary
+        if (P_option) {
+            for (int i = 0; i < processes.size(); i++) {
+                P_trace("%s", page_table_str(i).c_str());
+            }
+        }
+        F_trace("%s", frame_table_str().c_str());
+        if (S_option) {
+            uint64_t cost = 0;
+            for (int i = 0; i < processes.size(); i++) {
+                Process *proc = processes[i];
+                printf(
+                    "PROC[%d]: U=%llu M=%llu I=%llu O=%llu FI=%llu FO=%llu "
+                    "Z=%llu "
+                    "SV=%llu SP=%llu\n",
+                    i, proc->unmaps, proc->maps, proc->ins, proc->outs,
+                    proc->fins, proc->fouts, proc->zeros, proc->segv,
+                    proc->segprot);
+                cost += proc->unmaps * 410 + proc->maps * 350 +
+                        process_exits * 175 + proc->ins * 3200 +
+                        proc->outs * 2750 + proc->fins * 2350 +
+                        proc->fouts * 2800 + proc->zeros * 150 +
+                        proc->segv * 440 + proc->segprot * 410;
+            }
+            cost += ctx_switches * 130 + process_exits * 1230 +
+                    instructions.size() - process_exits - ctx_switches;
+            printf("TOTALCOST %lu %llu %llu %llu %lu\n", instructions.size(),
+                   ctx_switches, process_exits, cost, 4);
         }
     }
 };
@@ -482,6 +533,6 @@ int main(int argc, char *argv[]) {
     read_input_file(inputfile);
     RandGenerator random_generator(randomfile);
 
-    Simulator simulator(pager, &random_generator);
+    Simulator simulator(pager, random_generator);
     simulator.run();
 }
