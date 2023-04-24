@@ -194,7 +194,7 @@ class NRU : public Pager {
         int reset = 0;
         int class_ = -1;
         int classes[4] = {-1, -1, -1, -1};
-        if (intruction_idx - instruction_ckpt + 1>=  50) {
+        if (intruction_idx - instruction_ckpt + 1 >= 50) {
             reset = 1;
             instruction_ckpt = intruction_idx + 1;
         }
@@ -231,8 +231,84 @@ class NRU : public Pager {
         }
     }
 };
-// class Aging : public Pager {};
-// class WorkingSet : public Pager {};
+class Aging : public Pager {
+   public:
+    int select_victim_frame() override {
+        int i = hand;
+        uint64_t min_age = 0;
+        int min_age_frame = -1;
+        std::string frame_str = "";
+        char hex_string[32];
+        while (true) {
+            frame_t *frame = &frame_table[i % n_frames];
+            pte_t *pte = &processes[frame->pid]
+                              ->page_table.entries[frame->virtual_page_number];
+            frame->age = frame->age >> 1;
+            if (pte->referenced) {
+                frame->age += 0x80000000;
+                pte->referenced = false;
+            }
+
+            snprintf(hex_string, sizeof(hex_string), "%x", frame->age);
+            frame_str += std::to_string(i % n_frames) + ":" +
+                         std::string(hex_string) + " ";
+
+            if (min_age_frame == -1 || frame->age < min_age) {
+                min_age = frame->age;
+                min_age_frame = i % n_frames;
+            }
+
+            if (i - hand == n_frames - 1) {
+                break;
+            }
+            i++;
+        }
+        a_trace("ASELECT %d-%d | %s| %d", hand, i % n_frames, frame_str.c_str(),
+                min_age_frame);
+        hand = (min_age_frame + 1) % n_frames;
+        return min_age_frame;
+    }
+};
+class WorkingSet : public Pager {
+   public:
+    const int tau = 50;
+    void update_age(frame_t *frame) override { frame->age = intruction_idx; }
+    int select_victim_frame() override {
+        int i = hand;
+        int min_age_frame = -1;
+        int min_age = 0;
+        std::string frame_str = "";
+        char buffer[32];
+        while (true) {
+            frame_t *frame = &frame_table[i % n_frames];
+            pte_t *pte = &processes[frame->pid]
+                              ->page_table.entries[frame->virtual_page_number];
+            snprintf(buffer, sizeof(buffer), " %d(%d %d:%d %d)", i % n_frames,
+                     pte->referenced, frame->pid, frame->virtual_page_number,
+                     frame->age);
+            frame_str += std::string(buffer);
+
+            if (pte->referenced) {
+                pte->referenced = false;
+                frame->age = intruction_idx;
+            } else if (intruction_idx - frame->age >= tau) {
+                min_age_frame = i % n_frames;
+                snprintf(buffer, sizeof(buffer), " STOP(%d)", i - hand + 1);
+                frame_str += std::string(buffer);
+                break;
+            }
+
+            if (i - hand == n_frames - 1) {
+                break;
+            }
+            i++;
+        }
+        a_trace("ASELECT %d-%d | %s| %d", hand, (hand - 1) % n_frames,
+                frame_str.c_str(), min_age_frame);
+        hand = (min_age_frame + 1) % n_frames;
+        return min_age_frame;
+    }
+};
 
 std::string frame_table_str() {
     std::string outstring = "FT:";
@@ -579,12 +655,12 @@ int main(int argc, char *argv[]) {
                     case 'e':
                         pager = new NRU();
                         break;
-                        // case 'a':
-                        //     pager = new Aging();
-                        //     break;
-                        // case 'w':
-                        //     pager = new WorkingSet();
-                        //     break;
+                    case 'a':
+                        pager = new Aging();
+                        break;
+                    case 'w':
+                        pager = new WorkingSet();
+                        break;
                 }
                 break;
             case 'o':
