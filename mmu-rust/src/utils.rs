@@ -1,6 +1,6 @@
+use crate::{Process, VMA};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
-use crate::{Process, VMA};
 
 pub fn read_input_file(filename: &str) -> (Vec<Process>, Vec<(String, usize)>) {
     let file = File::open(filename).expect("Failed to open file");
@@ -8,14 +8,14 @@ pub fn read_input_file(filename: &str) -> (Vec<Process>, Vec<(String, usize)>) {
 
     let mut line = String::new();
 
-    // Skip the first 3 comment lines
-    for _ in 0..3 {
+    // Skip comment lines
+    loop {
         reader.read_line(&mut line).expect("Failed to read line");
+        if !line.starts_with('#') {
+            break;
+        }
         line.clear();
     }
-
-    // Read the number of processes
-    reader.read_line(&mut line).expect("Failed to read line");
     let num_processes: usize = line.trim().parse().expect("Failed to parse number");
     line.clear();
 
@@ -23,10 +23,11 @@ pub fn read_input_file(filename: &str) -> (Vec<Process>, Vec<(String, usize)>) {
     let mut processes = Vec::new();
     for _ in 0..num_processes {
         // Skip comment lines
-        while {
+        loop {
             reader.read_line(&mut line).expect("Failed to read line");
-            line.starts_with('#')
-        } {
+            if !line.starts_with('#') {
+                break;
+            }
             line.clear();
         }
 
