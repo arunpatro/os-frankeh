@@ -1,12 +1,12 @@
 // imports
 #include <stdlib.h>
 #include <unistd.h>
-#include <iostream>
-#include <fstream>
-#include <sstream>
-#include <vector>
-#include <string>
 
+#include <fstream>
+#include <iostream>
+#include <sstream>
+#include <string>
+#include <vector>
 
 // constants
 #define MAX_FRAMES 128
@@ -21,33 +21,79 @@ bool y_option;
 bool f_option;
 bool a_option;
 
-#define O_trace(fmt...) do { if (O_option) { printf(fmt); printf("\n"); fflush(stdout); } } while(0)
-#define P_trace(fmt...) do { if (P_option) { printf(fmt); printf("\n"); fflush(stdout); } } while(0)
-#define F_trace(fmt...) do { if (F_option) { printf(fmt); printf("\n"); fflush(stdout); } } while(0)
-#define S_trace(fmt...) do { if (S_option) { printf(fmt); printf("\n"); fflush(stdout); } } while(0)
-#define x_trace(fmt...) do { if (x_option) { printf(fmt); printf("\n"); fflush(stdout); } } while(0)
-#define y_trace(fmt...) do { if (y_option) { printf(fmt); printf("\n"); fflush(stdout); } } while(0)
-#define f_trace(fmt...) do { if (f_option) { printf(fmt); printf("\n"); fflush(stdout); } } while(0)
-#define a_trace(fmt...) do { if (a_option) { printf(fmt); printf("\n"); fflush(stdout); } } while(0)
-
+#define O_trace(fmt...)     \
+    do {                    \
+        if (O_option) {     \
+            printf(fmt);    \
+            printf("\n");   \
+            fflush(stdout); \
+        }                   \
+    } while (0)
+#define P_trace(fmt...)     \
+    do {                    \
+        if (P_option) {     \
+            printf(fmt);    \
+            printf("\n");   \
+            fflush(stdout); \
+        }                   \
+    } while (0)
+#define F_trace(fmt...)     \
+    do {                    \
+        if (F_option) {     \
+            printf(fmt);    \
+            printf("\n");   \
+            fflush(stdout); \
+        }                   \
+    } while (0)
+#define S_trace(fmt...)     \
+    do {                    \
+        if (S_option) {     \
+            printf(fmt);    \
+            printf("\n");   \
+            fflush(stdout); \
+        }                   \
+    } while (0)
+#define x_trace(fmt...)     \
+    do {                    \
+        if (x_option) {     \
+            printf(fmt);    \
+            printf("\n");   \
+            fflush(stdout); \
+        }                   \
+    } while (0)
+#define y_trace(fmt...)     \
+    do {                    \
+        if (y_option) {     \
+            printf(fmt);    \
+            printf("\n");   \
+            fflush(stdout); \
+        }                   \
+    } while (0)
+#define f_trace(fmt...)     \
+    do {                    \
+        if (f_option) {     \
+            printf(fmt);    \
+            printf("\n");   \
+            fflush(stdout); \
+        }                   \
+    } while (0)
+#define a_trace(fmt...)     \
+    do {                    \
+        if (a_option) {     \
+            printf(fmt);    \
+            printf("\n");   \
+            fflush(stdout); \
+        }                   \
+    } while (0)
 
 // basic classes
-class VirtualMemoryArea {
-   public:
-    int start;
-    int end;
-    bool w_protected;
-    bool f_mapped;
-    VirtualMemoryArea(int start, int end, bool w_protected, bool f_mapped) {
-        this->start = start;
-        this->end = end;
-        this->w_protected = w_protected;
-        this->f_mapped = f_mapped;
-    }
-};
+typedef struct {
+    int process_id;
+    int virtual_page_number;
+    unsigned int age;
+} frame_t;
 
-class PageTableEntry {
-   public:
+typedef struct {
     int frame_number;
     bool valid;
     bool referenced;
@@ -56,26 +102,20 @@ class PageTableEntry {
     bool write_protected;
     bool file_mapped;
     bool is_valid_vma;
-    PageTableEntry() {
-        this->frame_number = -1;
-        this->valid = false;
-        this->referenced = false;
-        this->modified = false;
-        this->paged_out = false;
-        this->write_protected = false;
-        this->file_mapped = false;
-        this->is_valid_vma = false;
-    }
+} pte_t;
+
+struct PageTable {
+    pte_t entries[MAX_VPAGES];
 };
 
-class PageTable {
-   public:
-    std::vector<PageTableEntry> entries;
-    PageTable() { entries.reserve(MAX_VPAGES); }
+struct VirtualMemoryArea {
+    int start;
+    int end;
+    bool w_protected;
+    bool f_mapped;
 };
 
-class Process {
-   public:
+struct Process {
     std::vector<VirtualMemoryArea> virtual_memory_areas;
     PageTable page_table;
 
@@ -89,32 +129,37 @@ class Process {
     unsigned int zeros;
     unsigned int segv;
     unsigned int segprot;
-
-    Process(std::vector<VirtualMemoryArea> virtual_memory_areas) {
-        this->virtual_memory_areas = virtual_memory_areas;
-        this->page_table = PageTable();
-        this->unmaps = 0;
-        this->maps = 0;
-        this->ins = 0;
-        this->outs = 0;
-        this->fins = 0;
-        this->fouts = 0;
-        this->zeros = 0;
-        this->segv = 0;
-        this->segprot = 0;
-    }
 };
 
-class Pager {};
+// global variables
+int n_frames;
+frame_t frame_table[MAX_FRAMES];
+std::vector<int> free_frame_list;
+std::vector<Process *> processes;
+std::vector<std::pair<char, int> > instructions;
 
-class FIFO : public Pager {};
-class Random : public Pager {};
-class Clock : public Pager {};
-class NRU : public Pager {};
-class Aging : public Pager {};
-class WorkingSet : public Pager {};
+class Pager {
+   public:
+    uint16_t hand;
+    virtual frame_t *select_victim_frame() = 0;
+    virtual void update_age(frame_t *frame) { ; };
+};
 
-/// util functions
+class FIFO : public Pager {
+   public:
+    uint16_t hand = 0;
+    frame_t *select_victim_frame() override {
+        frame_t *frame = &frame_table[hand];
+        hand = (hand + 1) % n_frames;
+        return frame;
+    }
+};
+// class Random : public Pager {};
+// class Clock : public Pager {};
+// class NRU : public Pager {};
+// class Aging : public Pager {};
+// class WorkingSet : public Pager {};
+
 class RandGenerator {
    private:
     std::vector<int> random_numbers;
@@ -140,11 +185,45 @@ class RandGenerator {
     }
 };
 
+class Simulator {
+   public:
+    Process *current_process;
+    Pager *pager;
+    RandGenerator *rand_generator;
+    int instruction;
+
+    // stats
+    uint32_t process_exits, ctx_switches;
+
+   public:
+    Simulator(Pager *pager, RandGenerator *rand_generator)
+        : pager(pager), rand_generator(rand_generator) {}
+
+    void run() {
+        for (int i = 0; i < instructions.size(); i++) {
+            char operation = instructions[i].first;
+            int pid = instructions[i].second;
+            Process *process = processes[pid];
+            PageTable *page_table = &process->page_table;
+
+            switch (operation) {
+                case 'c': {
+                    current_process = process;
+                    ctx_switches++;
+                    break;
+                }
+                case 'e': {
+                    printf("EXIT current process %d", pid);
+                    process_exits++;
+                }
+            }
+        }
+    }
+};
+// functions
 void read_input_file(const std::string &filename) {
     std::ifstream file(filename);
     std::string line;
-    std::vector<Process *> processes;
-    std::vector<std::pair<char, int> > instructions;
 
     // skip comments [at the beginning]
     while (getline(file, line)) {
@@ -152,7 +231,8 @@ void read_input_file(const std::string &filename) {
         break;
     }
 
-    // first line that is not a comment is the number of processes
+    // first line that is not a comment is the number of
+    // processes
     int n_processes = stoi(line);
 
     for (int i = 0; i < n_processes; i++) {
@@ -161,9 +241,8 @@ void read_input_file(const std::string &filename) {
             if (line.at(0) == '#') continue;
             break;
         }
-        // processes.push_back(new Process);
         int n_vmas = stoi(line);  // number of virtual memory areas
-
+        std::vector<VirtualMemoryArea> vmas;
         for (int j = 0; j < n_vmas; j++) {
             while (getline(file, line)) {
                 if (line.at(0) == '#') continue;  // Ignoring all the comments
@@ -172,12 +251,18 @@ void read_input_file(const std::string &filename) {
                 int start, end;
                 bool w_protected, f_mapped;
                 vma >> start >> end >> w_protected >> f_mapped;
-                // processes[i]->virtual_memory_areas.push_back(
-                //     new VirtualMemoryArea(start, end, w_protected, f_mapped));
+                vmas.push_back(
+                    VirtualMemoryArea{start, end, w_protected, f_mapped});
                 break;
             }
         }
+        // create the process
+        Process *process = new Process();
+        process->virtual_memory_areas = vmas;
+        process->page_table = PageTable();
+        processes.push_back(process);
     }
+
     while (getline(file, line)) {
         if (line.at(0) == '#') continue;  // Ignoring all the comments
 
@@ -190,11 +275,10 @@ void read_input_file(const std::string &filename) {
 }
 
 int main(int argc, char *argv[]) {
-    // string usage = "./mmu –f<num_frames> -a<algo> [-o<options>] inputfile
-    // randomfile";
+    // string usage = "./mmu –f<num_frames> -a<algo>
+    // [-o<options>] inputfile randomfile";
     int c;
     char alg;
-    int n_frames;
     Pager *pager;
     while ((c = getopt(argc, argv, "f:a:o:")) != -1) {
         switch (c) {
@@ -210,21 +294,21 @@ int main(int argc, char *argv[]) {
                     case 'f':
                         pager = new FIFO();
                         break;
-                    case 'r':
-                        pager = new Random();
-                        break;
-                    case 'c':
-                        pager = new Clock();
-                        break;
-                    case 'e':
-                        pager = new NRU();
-                        break;
-                    case 'a':
-                        pager = new Aging();
-                        break;
-                    case 'w':
-                        pager = new WorkingSet();
-                        break;
+                        // case 'r':
+                        //     pager = new Random();
+                        //     break;
+                        // case 'c':
+                        //     pager = new Clock();
+                        //     break;
+                        // case 'e':
+                        //     pager = new NRU();
+                        //     break;
+                        // case 'a':
+                        //     pager = new Aging();
+                        //     break;
+                        // case 'w':
+                        //     pager = new WorkingSet();
+                        //     break;
                 }
                 break;
             case 'o':
@@ -245,6 +329,8 @@ int main(int argc, char *argv[]) {
 
     std::string inputfile = argv[optind];
     std::string randomfile = argv[optind + 1];
+
+    // // globally mutate the processes and instructions
     read_input_file(inputfile);
     RandGenerator random_generator(randomfile);
 }
