@@ -138,6 +138,7 @@ frame_t frame_table[MAX_FRAMES];
 std::queue<int> free_frame_list;
 std::vector<Process *> processes;
 std::vector<std::pair<char, int> > instructions;
+std::vector<uint64_t> random_numbers;
 
 class Pager {
    public:
@@ -156,36 +157,21 @@ class FIFO : public Pager {
         return frame;
     }
 };
-// class Random : public Pager {};
+class Random : public Pager {
+   public:
+    uint16_t hand = 0;
+    int select_victim_frame() override {
+        int frame = random_numbers[hand] % n_frames;
+        a_trace("ASELECT %d", frame);
+        hand = (hand + 1) % random_numbers.size();
+        return frame;
+    }
+};
+
 // class Clock : public Pager {};
 // class NRU : public Pager {};
 // class Aging : public Pager {};
 // class WorkingSet : public Pager {};
-
-class RandGenerator {
-   private:
-    std::vector<int> random_numbers;
-
-   public:
-    int rand_index = 0;
-    int number_of_random_values;
-    RandGenerator(const std::string &filename) {
-        int number;
-        std::ifstream infile(filename);
-
-        infile >> number_of_random_values;
-        random_numbers.reserve(number_of_random_values);
-        while (infile >> number) {
-            random_numbers.push_back(number);
-        }
-    }
-
-    int next(int value) {
-        int rand = 1 + (random_numbers[rand_index] % value);
-        rand_index = (rand_index + 1) % random_numbers.size();
-        return rand;
-    }
-};
 
 std::string frame_table_str() {
     std::string outstring = "FT:";
@@ -239,7 +225,6 @@ class Simulator {
    public:
     int current_pid = -1;
     Pager *pager;
-    RandGenerator *rand_generator;
     int instruction;
 
     // stats
@@ -247,9 +232,8 @@ class Simulator {
     uint64_t ctx_switches = 0;
 
    public:
-    Simulator(Pager *pager, RandGenerator rand_generator) {
+    Simulator(Pager *pager) {
         this->pager = pager;
-        rand_generator = rand_generator;
 
         // initialize frame table
         for (int i = 0; i < MAX_FRAMES; i++) {
@@ -441,6 +425,16 @@ class Simulator {
 };
 
 // functions
+void read_random_file(const std::string &randomfile) {
+    // Function that takes the name of a file with random numbers and stores
+    // them in a global variable called random_values
+    std::ifstream rfile(randomfile);
+    int n_random, number;
+    rfile >> n_random;
+    while (rfile >> number) {
+        random_numbers.push_back(number);
+    }
+}
 void read_input_file(const std::string &filename) {
     std::ifstream file(filename);
     std::string line;
@@ -514,21 +508,21 @@ int main(int argc, char *argv[]) {
                     case 'f':
                         pager = new FIFO();
                         break;
-                        // case 'r':
-                        //     pager = new Random();
-                        //     break;
-                        // case 'c':
-                        //     pager = new Clock();
-                        //     break;
-                        // case 'e':
-                        //     pager = new NRU();
-                        //     break;
-                        // case 'a':
-                        //     pager = new Aging();
-                        //     break;
-                        // case 'w':
-                        //     pager = new WorkingSet();
-                        //     break;
+                    case 'r':
+                        pager = new Random();
+                        break;
+                    case 'c':
+                        pager = new Clock();
+                        break;
+                    case 'e':
+                        pager = new NRU();
+                        break;
+                    case 'a':
+                        pager = new Aging();
+                        break;
+                    case 'w':
+                        pager = new WorkingSet();
+                        break;
                 }
                 break;
             case 'o':
@@ -552,8 +546,8 @@ int main(int argc, char *argv[]) {
 
     // // globally mutate the processes and instructions
     read_input_file(inputfile);
-    RandGenerator random_generator(randomfile);
+    read_random_file(randomfile);
 
-    Simulator simulator(pager, random_generator);
+    Simulator simulator(pager);
     simulator.run();
 }
