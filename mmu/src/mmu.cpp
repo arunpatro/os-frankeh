@@ -134,6 +134,7 @@ struct Process {
 
 // global variables
 int n_frames;
+uint64_t intruction_idx = 0;
 frame_t frame_table[MAX_FRAMES];
 std::queue<int> free_frame_list;
 std::vector<Process *> processes;
@@ -185,7 +186,51 @@ class Clock : public Pager {
         }
     }
 };
-// class NRU : public Pager {};
+class NRU : public Pager {
+   public:
+    uint64_t instruction_ckpt = 0;
+    int select_victim_frame() override {
+        int i = hand;
+        int reset = 0;
+        int class_ = -1;
+        int classes[4] = {-1, -1, -1, -1};
+        if (intruction_idx - instruction_ckpt + 1>=  50) {
+            reset = 1;
+            instruction_ckpt = intruction_idx + 1;
+        }
+        while (true) {
+            frame_t *frame = &frame_table[i % n_frames];
+            pte_t *pte = &processes[frame->pid]
+                              ->page_table.entries[frame->virtual_page_number];
+
+            class_ = (pte->referenced << 1) + pte->modified;
+            if (classes[class_] == -1) {
+                classes[class_] = i % n_frames;
+            }
+
+            if (reset == 1) {
+                pte->referenced = false;
+            } else if (classes[0] > -1) {
+                break;
+            }
+
+            if (i - hand == n_frames - 1) {
+                break;
+            }
+
+            i++;
+        }
+
+        for (int j = 0; j < 4; j++) {
+            if (classes[j] > -1) {
+                a_trace("ASELECT: hand=%d %d | %d %2d %2d", hand, reset, j,
+                        classes[j], i - hand + 1);
+                hand = (classes[j] + 1) % n_frames;
+                return classes[j];
+            }
+        }
+    }
+};
 // class Aging : public Pager {};
 // class WorkingSet : public Pager {};
 
@@ -351,6 +396,7 @@ class Simulator {
 
     void run() {
         for (int i = 0; i < instructions.size(); i++) {
+            intruction_idx = i;
             char operation = instructions[i].first;
             int value = instructions[i].second;
             // Process *process = processes[value];
@@ -530,9 +576,9 @@ int main(int argc, char *argv[]) {
                     case 'c':
                         pager = new Clock();
                         break;
-                        // case 'e':
-                        //     pager = new NRU();
-                        //     break;
+                    case 'e':
+                        pager = new NRU();
+                        break;
                         // case 'a':
                         //     pager = new Aging();
                         //     break;
