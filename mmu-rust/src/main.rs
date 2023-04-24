@@ -1,6 +1,5 @@
 use clap::{App, Arg};
 use std::cell::RefCell;
-use std::cmp::min;
 use std::collections::VecDeque;
 use std::rc::Rc;
 mod utils;
@@ -210,14 +209,13 @@ struct Frame {
 }
 
 trait Pager {
-    fn update_age(&mut self, instr_idx: usize) -> u32 {
+    fn update_age(&mut self, _instr_idx: usize) -> u32 {
         0
     }
     fn select_victim_frame(&mut self, instr_idx: usize) -> usize;
 }
 
 struct FIFO {
-    frame_table: Rc<RefCell<Vec<Option<Frame>>>>,
     hand: usize,
     num_frames: usize,
 }
@@ -225,7 +223,6 @@ impl FIFO {
     fn new(frame_table: Rc<RefCell<Vec<Option<Frame>>>>) -> FIFO {
         let num_frames = frame_table.borrow().len();
         FIFO {
-            frame_table,
             hand: 0,
             num_frames,
         }
@@ -241,7 +238,6 @@ impl Pager for FIFO {
 }
 
 struct Random {
-    frame_table: Rc<RefCell<Vec<Option<Frame>>>>,
     hand: usize,
     num_frames: usize,
     random_numbers: Vec<usize>,
@@ -251,7 +247,6 @@ impl Random {
     fn new(frame_table: Rc<RefCell<Vec<Option<Frame>>>>, random_numbers: Vec<usize>) -> Random {
         let num_frames = frame_table.borrow().len();
         Random {
-            frame_table,
             hand: 0,
             num_frames,
             random_numbers,
@@ -295,7 +290,7 @@ impl Pager for Clock {
         let old_hand = self.hand;
         loop {
             // get frame and then destructure and match frame to pid and vpage
-            let frame = &self.frame_table.borrow()[frame_idx % &self.num_frames];
+            let frame = &self.frame_table.borrow()[frame_idx % self.num_frames];
             let (pid, vpage) = match frame {
                 Some(frame) => (frame.pid, frame.vpage),
                 None => panic!("frame table entry is empty"),
@@ -431,7 +426,7 @@ impl Aging {
 }
 
 impl Pager for Aging {
-    fn select_victim_frame(&mut self, instr_idx: usize) -> usize {
+    fn select_victim_frame(&mut self, _: usize) -> usize {
         let mut frame_idx = self.hand;
         let old_hand = self.hand;
         let mut lowest_age = None;
@@ -548,7 +543,6 @@ impl Pager for WorkingSet {
                     page.referenced = false;
                     frame.age = instr_idx as u32; // reset age as last time checked
                 } else if instr_idx - frame.age as usize >= self.tau {
-                    earliest_use_time = frame.age;
                     earliest_use_frame = frame_idx % self.num_frames;
                     frame_string.push_str(&format!(" STOP({})", frame_idx - old_hand + 1));
                     break;
@@ -673,7 +667,7 @@ impl MMU {
         frame_table[frame_idx] = Some(Frame {
             pid: self.current_process.unwrap() as u64,
             vpage,
-            age: self.pager.update_age(idx) // age: 0,
+            age: self.pager.update_age(idx), // age: 0,
         });
 
         // 4. populate it -
