@@ -201,6 +201,41 @@ std::string frame_table_str() {
     return outstring;
 }
 
+std::string page_table_str(int pid) {
+    std::string outstring = "PT[" + std::to_string(pid) + "]:";
+    Process *process = processes[pid];
+
+    for (int i = 0; i < MAX_VPAGES; i++) {
+        pte_t *pte = &process->page_table.entries[i];
+        if (pte->valid) {
+            outstring += " " + std::to_string(i) + ":";
+            if (pte->referenced) {
+                outstring += "R";
+            } else {
+                outstring += "-";
+            }
+            if (pte->modified) {
+                outstring += "M";
+            } else {
+                outstring += "-";
+            }
+            if (pte->paged_out) {
+                outstring += "S";
+            } else {
+                outstring += "-";
+            }
+        } else {
+            if (pte->is_valid_vma) {
+                outstring += " #";
+            } else {
+                outstring += " *";
+            }
+        }
+    }
+
+    return outstring;
+}
+
 class Simulator {
    public:
     int current_pid = -1;
@@ -216,6 +251,13 @@ class Simulator {
     Simulator(Pager *pager, RandGenerator *rand_generator) {
         pager = pager;
         rand_generator = rand_generator;
+
+        // initialize frame table
+        for (int i = 0; i < MAX_FRAMES; i++) {
+            frame_table[i].pid = -1;
+            frame_table[i].virtual_page_number = -1;
+            frame_table[i].age = 0;
+        }
 
         // initialize free frame list
         for (int i = 0; i < n_frames; i++) {
@@ -267,7 +309,7 @@ class Simulator {
 
         frame->pid = current_pid;
         frame->virtual_page_number = virtual_page_number;
-        pager->update_age(frame);
+        // pager->update_age(frame); // TODO need to check what's happening
 
         if (pte->file_mapped) {
             current_process->fins++;
@@ -293,44 +335,38 @@ class Simulator {
             // PageTable *page_table = &process->page_table;
 
             O_trace("%d: ==> %c %d", i, operation, value);
-            switch (operation) {
-                case 'c': {
-                    current_pid = value;
-                    ctx_switches++;
-                    continue;
-                }
-                case 'e': {
-                    printf("EXIT current process %d", value);
-                    process_exits++;
-                    continue;
-                }
-                case 'r' || 'w': {
-                    Process *process = processes[current_pid];
-                    pte_t *pte = &process->page_table.entries[value];
+            if (operation == 'c') {
+                current_pid = value;
+                ctx_switches++;
+                continue;
+            } else if (operation == 'e') {
+                printf("EXIT current process %d", value);
+                process_exits++;
+                continue;
+            } else if (operation == 'r' || operation == 'w') {
+                Process *process = processes[current_pid];
+                pte_t *pte = &process->page_table.entries[value];
 
-                    // check if the page is valid
-                    if (!pte->valid) {
-                        page_fault_handler(value);
-                    }
+                // check if the page is valid
+                if (!pte->valid) {
+                    page_fault_handler(value);
+                }
 
-                    pte->referenced = true;
-                    if (operation == 'w' && !pte->write_protected) {
-                        pte->modified = true;
-                    } else {
+                pte->referenced = true;
+                if (operation == 'w') {
+                    if (pte->write_protected) {
                         O_trace("SEGPROT");
                         process->segprot++;
+                    } else {
+                        pte->modified = true;
                     }
-
-                    break;
                 }
+                x_trace("%s", page_table_str(current_pid).c_str());
+                f_trace("%s", frame_table_str().c_str());
             }
-            x_trace("%s", frame_table_str().c_str());
-            f_trace("ftrace");
         }
     }
 };
-
-
 
 // functions
 void read_input_file(const std::string &filename) {
