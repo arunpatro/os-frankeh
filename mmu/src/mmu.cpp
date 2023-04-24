@@ -91,8 +91,8 @@ bool a_option;
 
 // basic classes
 typedef struct {
-    int pid;
-    int virtual_page_number;
+    uint16_t pid;
+    uint16_t virtual_page_number;
     uint32_t age;
 } frame_t;
 
@@ -113,8 +113,8 @@ struct PageTable {
 };
 
 struct VirtualMemoryArea {
-    int start;
-    int end;
+    uint16_t start;
+    uint16_t end;
     bool write_protected;
     bool file_mapped;
 };
@@ -122,6 +122,7 @@ struct VirtualMemoryArea {
 struct Process {
     std::vector<VirtualMemoryArea> virtual_memory_areas;
     PageTable page_table;
+    uint16_t n_vmas;
 
     // stats
     uint64_t unmaps;
@@ -136,12 +137,14 @@ struct Process {
 };
 
 // global variables
-int n_frames;
+uint16_t n_frames;
+uint64_t n_random;
+uint32_t n_instructions;
 uint32_t instruction_idx = 0;
 frame_t frame_table[MAX_FRAMES];
 std::queue<uint16_t> free_frame_list;
 std::vector<Process *> processes;
-std::vector<std::pair<char, int> > instructions;
+std::vector<std::pair<char, uint32_t> > instructions;
 std::vector<uint32_t> random_numbers;
 
 class Pager {
@@ -164,8 +167,9 @@ class Random : public Pager {
    public:
     uint16_t select_victim_frame() override {
         uint16_t frame = random_numbers[hand] % n_frames;
-        // a_trace("ASELECT %d", frame); // random pager doesn't implement a_trace
-        hand = (hand + 1) % random_numbers.size();
+        // a_trace("ASELECT %d", frame); // random pager doesn't implement
+        // a_trace
+        hand = (hand + 1) % n_random;
         return frame;
     }
 };
@@ -227,10 +231,11 @@ class NRU : public Pager {
 
         for (int j = 0; j < 4; j++) {
             if (classes[j] > -1) {
+                uint16_t selected_frame = classes[j];
                 a_trace("ASELECT: hand=%2d %d | %d %2d %2d", hand, reset, j,
-                        classes[j], i - hand + 1);
-                hand = (classes[j] + 1) % n_frames;
-                return classes[j];
+                        selected_frame, i - hand + 1);
+                hand = (selected_frame + 1) % n_frames;
+                return selected_frame;
             }
         }
     }
@@ -388,14 +393,14 @@ class Simulator {
         this->pager = pager;
 
         // initialize frame table
-        for (int i = 0; i < MAX_FRAMES; i++) {
-            frame_table[i].pid = -1;
-            frame_table[i].virtual_page_number = -1;
-            frame_table[i].age = 0;
+        for (frame_t &frame : frame_table) {
+            frame.pid = -1;
+            frame.virtual_page_number = -1;
+            frame.age = 0;
         }
 
         // initialize free frame list
-        for (int i = 0; i < n_frames; i++) {
+        for (uint16_t i = 0; i < n_frames; i++) {
             free_frame_list.push(i);
         }
     }
@@ -441,14 +446,12 @@ class Simulator {
 
         // check if the page is valid vma
         bool is_valid_vma = false;
-        for (int i = 0; i < current_process->virtual_memory_areas.size(); i++) {
-            VirtualMemoryArea *vma = &current_process->virtual_memory_areas[i];
-            if (virtual_page_number >= vma->start &&
-                virtual_page_number <= vma->end) {
+        for (const auto &vma : current_process->virtual_memory_areas) {
+            if (virtual_page_number >= vma.start && virtual_page_number <= vma.end) {
                 is_valid_vma = true;
                 pte->is_valid_vma = is_valid_vma;
-                pte->file_mapped = vma->file_mapped;
-                pte->write_protected = vma->write_protected;
+                pte->file_mapped = vma.file_mapped;
+                pte->write_protected = vma.write_protected;
                 break;
             }
         }
@@ -488,7 +491,7 @@ class Simulator {
     }
 
     void run() {
-        for (int i = 0; i < instructions.size(); i++) {
+        for (int i = 0; i < n_instructions; i++) {
             instruction_idx = i;
             char operation = instructions[i].first;
             int value = instructions[i].second;
@@ -571,9 +574,9 @@ class Simulator {
                     proc->outs * 2750 + proc->fins * 2350 + proc->fouts * 2800 +
                     proc->zeros * 150 + proc->segv * 440 + proc->segprot * 410;
             }
-            cost += ctx_switches * 130 + process_exits * 1230 +
-                    instructions.size() - process_exits - ctx_switches;
-            printf("TOTALCOST %lu %llu %llu %llu %lu\n", instructions.size(),
+            cost += ctx_switches * 130 + process_exits * 1230 + n_instructions -
+                    process_exits - ctx_switches;
+            printf("TOTALCOST %lu %llu %llu %llu %lu\n", n_instructions,
                    ctx_switches, process_exits, cost, sizeof(pte_t));
         }
     }
@@ -584,8 +587,8 @@ void read_random_file(const std::string &randomfile) {
     // Function that takes the name of a file with random numbers and stores
     // them in a global variable called random_values
     std::ifstream rfile(randomfile);
-    int n_random, number;
     rfile >> n_random;
+    uint32_t number;
     while (rfile >> number) {
         random_numbers.push_back(number);
     }
@@ -610,14 +613,14 @@ void read_input_file(const std::string &filename) {
             if (line.at(0) == '#') continue;
             break;
         }
-        int n_vmas = stoi(line);  // number of virtual memory areas
+        uint16_t n_vmas = stoi(line);  // number of virtual memory areas
         std::vector<VirtualMemoryArea> vmas;
         for (int j = 0; j < n_vmas; j++) {
             while (getline(file, line)) {
                 if (line.at(0) == '#') continue;  // Ignoring all the comments
                 std::stringstream vma;
                 vma << line;
-                int start, end;
+                uint16_t start, end;
                 bool w_protected, f_mapped;
                 vma >> start >> end >> w_protected >> f_mapped;
                 vmas.push_back(
@@ -627,6 +630,7 @@ void read_input_file(const std::string &filename) {
         }
         // create the process
         Process *process = new Process();
+        process->n_vmas = n_vmas;
         process->virtual_memory_areas = vmas;
         process->page_table = PageTable();
         processes.push_back(process);
@@ -641,6 +645,7 @@ void read_input_file(const std::string &filename) {
         line_stream >> instruction >> argument;
         instructions.push_back(std::make_pair(instruction, argument));
     }
+    n_instructions = instructions.size();
 }
 
 int main(int argc, char *argv[]) {
