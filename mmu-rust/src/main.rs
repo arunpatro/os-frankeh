@@ -521,37 +521,34 @@ impl Pager for WorkingSet {
         let mut frame_string = String::new(); // Initialize with empty string
 
         loop {
-            let (pid, vpage);
-            {
-                let mut frame_table = self.frame_table.borrow_mut();
-                let frame = frame_table[frame_idx % self.num_frames].as_mut().unwrap();
-                pid = frame.pid;
-                vpage = frame.vpage;
-                let page = &mut self.processes.borrow_mut()[pid as usize].page_table.entries[vpage];
+            let mut frame_table = self.frame_table.borrow_mut();
+            let frame = frame_table[frame_idx % self.num_frames].as_mut().unwrap();
+            let pid = frame.pid;
+            let vpage = frame.vpage;
+            let page = &mut self.processes.borrow_mut()[pid as usize].page_table.entries[vpage];
 
-                // update earliest use time and frame
-                frame_string.push_str(&format!(
-                    " {}({} {}:{} {})",
-                    frame_idx % self.num_frames,
-                    page.referenced as u8,
-                    pid,
-                    vpage,
-                    frame.age
-                ));
+            // update earliest use time and frame
+            frame_string.push_str(&format!(
+                " {}({} {}:{} {})",
+                frame_idx % self.num_frames,
+                page.referenced as u8,
+                pid,
+                vpage,
+                frame.age
+            ));
 
-                if page.referenced {
-                    page.referenced = false;
-                    frame.age = instr_idx as u32; // reset age as last time checked
-                } else if instr_idx - frame.age as usize >= self.tau {
-                    earliest_use_frame = frame_idx % self.num_frames;
-                    frame_string.push_str(&format!(" STOP({})", frame_idx - old_hand + 1));
-                    break;
-                }
+            if page.referenced {
+                page.referenced = false;
+                frame.age = instr_idx as u32; // reset age as last time checked
+            } else if instr_idx - frame.age as usize >= self.tau {
+                earliest_use_frame = frame_idx % self.num_frames;
+                frame_string.push_str(&format!(" STOP({})", frame_idx - old_hand + 1));
+                break;
+            }
 
-                if frame.age < earliest_use_time {
-                    earliest_use_time = frame.age;
-                    earliest_use_frame = frame_idx % self.num_frames;
-                }
+            if frame.age < earliest_use_time {
+                earliest_use_time = frame.age;
+                earliest_use_frame = frame_idx % self.num_frames;
             }
             // One cycle through the frame table
             if frame_idx - old_hand == self.num_frames - 1 {
