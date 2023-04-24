@@ -190,7 +190,7 @@ class NRU : public Pager {
    public:
     uint64_t instruction_ckpt = 0;
     int select_victim_frame() override {
-        uint16_t i = hand;
+        uint32_t i = hand;
         int reset = 0;
         int class_ = -1;
         int classes[4] = {-1, -1, -1, -1};
@@ -278,7 +278,7 @@ class WorkingSet : public Pager {
         uint32_t min_age = instruction_idx;
         int min_age_frame = hand;
         std::string frame_str = "";
-        char buffer[150];
+        char buffer[100];
         while (true) {
             frame_t *frame = &frame_table[i % n_frames];
             pte_t *pte = &processes[frame->pid]
