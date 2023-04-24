@@ -317,6 +317,7 @@ class Simulator {
             }
         }
         if (!is_valid_vma) {
+            O_trace(" SEGV");
             current_process->segv++;
             return 1;  // signal error
         }
@@ -361,8 +362,27 @@ class Simulator {
                 ctx_switches++;
                 continue;
             } else if (operation == 'e') {
-                printf("EXIT current process %d", value);
+                printf("EXIT current process %d\n", value);
                 process_exits++;
+                Process *process = processes[current_pid];
+                for (int i = 0; i < MAX_VPAGES; i++) {
+                    pte_t *pte = &process->page_table.entries[i];
+                    if (pte->valid) {
+                        O_trace(" UNMAP %d:%d", current_pid, i);
+                        process->unmaps++;
+                        frame_t *frame = &frame_table[pte->frame_number];
+                        frame->pid = -1;
+                        frame->virtual_page_number = -1;
+                        frame->age = 0;
+                        free_frame_list.push(pte->frame_number);
+                        if (pte->modified && pte->file_mapped) {
+                            O_trace(" FOUT");
+                            process->fouts++;
+                        }
+                    }
+                    pte->valid = false;
+                    pte->paged_out = false;
+                }
                 continue;
             } else if (operation == 'r' || operation == 'w') {
                 Process *process = processes[current_pid];
@@ -370,7 +390,9 @@ class Simulator {
 
                 // check if the page is valid
                 if (!pte->valid) {
-                    page_fault_handler(value);
+                    if (page_fault_handler(value)) {
+                        continue;
+                    }
                 }
 
                 pte->referenced = true;
@@ -405,11 +427,10 @@ class Simulator {
                     i, proc->unmaps, proc->maps, proc->ins, proc->outs,
                     proc->fins, proc->fouts, proc->zeros, proc->segv,
                     proc->segprot);
-                cost += proc->unmaps * 410 + proc->maps * 350 +
-                        process_exits * 175 + proc->ins * 3200 +
-                        proc->outs * 2750 + proc->fins * 2350 +
-                        proc->fouts * 2800 + proc->zeros * 150 +
-                        proc->segv * 440 + proc->segprot * 410;
+                cost +=
+                    proc->unmaps * 410 + proc->maps * 350 + proc->ins * 3200 +
+                    proc->outs * 2750 + proc->fins * 2350 + proc->fouts * 2800 +
+                    proc->zeros * 150 + proc->segv * 440 + proc->segprot * 410;
             }
             cost += ctx_switches * 130 + process_exits * 1230 +
                     instructions.size() - process_exits - ctx_switches;
