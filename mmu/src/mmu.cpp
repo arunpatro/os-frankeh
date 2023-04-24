@@ -142,14 +142,13 @@ std::vector<uint64_t> random_numbers;
 
 class Pager {
    public:
-    uint16_t hand;
+    uint16_t hand = 0;
     virtual int select_victim_frame() = 0;
     virtual void update_age(frame_t *frame) { ; };
 };
 
 class FIFO : public Pager {
    public:
-    uint16_t hand = 0;
     int select_victim_frame() override {
         int frame = hand;
         a_trace("ASELECT %d", frame % n_frames);
@@ -159,7 +158,6 @@ class FIFO : public Pager {
 };
 class Random : public Pager {
    public:
-    uint16_t hand = 0;
     int select_victim_frame() override {
         int frame = random_numbers[hand] % n_frames;
         a_trace("ASELECT %d", frame);
@@ -168,7 +166,25 @@ class Random : public Pager {
     }
 };
 
-// class Clock : public Pager {};
+class Clock : public Pager {
+   public:
+    int select_victim_frame() override {
+        int i = hand;
+        while (true) {
+            frame_t *frame = &frame_table[i % n_frames];
+            pte_t *pte = &processes[frame->pid]
+                              ->page_table.entries[frame->virtual_page_number];
+            if (pte->referenced) {
+                pte->referenced = false;
+                i++;
+            } else {
+                a_trace("ASELECT %d %d", hand, i - hand + 1);
+                hand = (i + 1) % n_frames;
+                return i % n_frames;
+            }
+        }
+    }
+};
 // class NRU : public Pager {};
 // class Aging : public Pager {};
 // class WorkingSet : public Pager {};
@@ -514,15 +530,15 @@ int main(int argc, char *argv[]) {
                     case 'c':
                         pager = new Clock();
                         break;
-                    case 'e':
-                        pager = new NRU();
-                        break;
-                    case 'a':
-                        pager = new Aging();
-                        break;
-                    case 'w':
-                        pager = new WorkingSet();
-                        break;
+                        // case 'e':
+                        //     pager = new NRU();
+                        //     break;
+                        // case 'a':
+                        //     pager = new Aging();
+                        //     break;
+                        // case 'w':
+                        //     pager = new WorkingSet();
+                        //     break;
                 }
                 break;
             case 'o':
