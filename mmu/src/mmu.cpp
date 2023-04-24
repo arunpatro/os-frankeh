@@ -91,7 +91,7 @@ bool a_option;
 typedef struct {
     int pid;
     int virtual_page_number;
-    unsigned int age;
+    uint32_t age;
 } frame_t;
 
 typedef struct {
@@ -231,44 +231,50 @@ class NRU : public Pager {
         }
     }
 };
+
 class Aging : public Pager {
    public:
+    void update_age(frame_t *frame) override { frame->age = 0; }
     int select_victim_frame() override {
         uint32_t i = hand;
-        uint32_t min_age = 0;
+        uint32_t min_age = 0xffffffff;
         int min_age_frame = -1;
         std::string frame_str = "";
-        char hex_string[32];
+        char buffer[100];
         while (true) {
             frame_t *frame = &frame_table[i % n_frames];
             pte_t *pte = &processes[frame->pid]
                               ->page_table.entries[frame->virtual_page_number];
+
             frame->age = frame->age >> 1;
             if (pte->referenced) {
-                frame->age += 0x80000000;
+                frame->age = frame->age | 0x80000000;
                 pte->referenced = false;
             }
 
-            sprintf(hex_string, "%x", frame->age);
-            frame_str += std::to_string(i % n_frames) + ":" +
-                         std::string(hex_string) + " ";
+            sprintf(buffer, "%d:%x ", i % n_frames, frame->age);
+            frame_str += std::string(buffer);
 
+            // update the min age and min age frame
             if (min_age_frame == -1 || frame->age < min_age) {
                 min_age = frame->age;
                 min_age_frame = i % n_frames;
             }
 
-            if (i - hand == n_frames - 1) {
+            // only do n_frames iterations
+            if (i - hand + 1 == n_frames) {
                 break;
             }
             i++;
         }
+        assert(min_age_frame > -1);
         a_trace("ASELECT %d-%d | %s| %d", hand, i % n_frames, frame_str.c_str(),
                 min_age_frame);
         hand = (min_age_frame + 1) % n_frames;
         return min_age_frame;
     }
 };
+
 class WorkingSet : public Pager {
    public:
     const int tau = 50;
@@ -283,9 +289,8 @@ class WorkingSet : public Pager {
             frame_t *frame = &frame_table[i % n_frames];
             pte_t *pte = &processes[frame->pid]
                               ->page_table.entries[frame->virtual_page_number];
-            sprintf(buffer, " %d(%d %d:%d %d)", i % n_frames,
-                     pte->referenced, frame->pid, frame->virtual_page_number,
-                     frame->age);
+            sprintf(buffer, " %d(%d %d:%d %d)", i % n_frames, pte->referenced,
+                    frame->pid, frame->virtual_page_number, frame->age);
             frame_str += std::string(buffer);
 
             if (pte->referenced) {
@@ -308,8 +313,9 @@ class WorkingSet : public Pager {
             }
             i++;
         }
-        a_trace("ASELECT %d-%d |%s | %d", hand, (hand + n_frames - 1) % n_frames,
-                frame_str.c_str(), min_age_frame);
+        a_trace("ASELECT %d-%d |%s | %d", hand,
+                (hand + n_frames - 1) % n_frames, frame_str.c_str(),
+                min_age_frame);
         hand = (min_age_frame + 1) % n_frames;
         return min_age_frame;
     }
@@ -451,6 +457,8 @@ class Simulator {
         // all valid get a free frame
         int frame_idx = get_frame();
         frame_t *frame = &frame_table[frame_idx];
+
+        // initialize the page table entry
         pte->valid = true;
         pte->referenced = true;
         pte->frame_number = frame_idx;
