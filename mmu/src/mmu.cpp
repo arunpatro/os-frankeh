@@ -24,74 +24,66 @@ bool y_option;
 bool f_option;
 bool a_option;
 
-#define O_trace(fmt...)     \
-    do {                    \
-        if (O_option) {     \
-            printf(fmt);    \
-            printf("\n");   \
-            fflush(stdout); \
-        }                   \
+#define O_trace(fmt...)   \
+    do {                  \
+        if (O_option) {   \
+            printf(fmt);  \
+            printf("\n"); \
+        }                 \
     } while (0)
-#define P_trace(fmt...)     \
-    do {                    \
-        if (P_option) {     \
-            printf(fmt);    \
-            printf("\n");   \
-            fflush(stdout); \
-        }                   \
+#define P_trace(fmt...)   \
+    do {                  \
+        if (P_option) {   \
+            printf(fmt);  \
+            printf("\n"); \
+        }                 \
     } while (0)
-#define F_trace(fmt...)     \
-    do {                    \
-        if (F_option) {     \
-            printf(fmt);    \
-            printf("\n");   \
-            fflush(stdout); \
-        }                   \
+#define F_trace(fmt...)   \
+    do {                  \
+        if (F_option) {   \
+            printf(fmt);  \
+            printf("\n"); \
+        }                 \
     } while (0)
-#define S_trace(fmt...)     \
-    do {                    \
-        if (S_option) {     \
-            printf(fmt);    \
-            printf("\n");   \
-            fflush(stdout); \
-        }                   \
+#define S_trace(fmt...)   \
+    do {                  \
+        if (S_option) {   \
+            printf(fmt);  \
+            printf("\n"); \
+        }                 \
     } while (0)
-#define x_trace(fmt...)     \
-    do {                    \
-        if (x_option) {     \
-            printf(fmt);    \
-            printf("\n");   \
-            fflush(stdout); \
-        }                   \
+#define x_trace(fmt...)   \
+    do {                  \
+        if (x_option) {   \
+            printf(fmt);  \
+            printf("\n"); \
+        }                 \
     } while (0)
-#define y_trace(fmt...)     \
-    do {                    \
-        if (y_option) {     \
-            printf(fmt);    \
-            printf("\n");   \
-            fflush(stdout); \
-        }                   \
+#define y_trace(fmt...)   \
+    do {                  \
+        if (y_option) {   \
+            printf(fmt);  \
+            printf("\n"); \
+        }                 \
     } while (0)
-#define f_trace(fmt...)     \
-    do {                    \
-        if (f_option) {     \
-            printf(fmt);    \
-            printf("\n");   \
-            fflush(stdout); \
-        }                   \
+#define f_trace(fmt...)   \
+    do {                  \
+        if (f_option) {   \
+            printf(fmt);  \
+            printf("\n"); \
+        }                 \
     } while (0)
-#define a_trace(fmt...)     \
-    do {                    \
-        if (a_option) {     \
-            printf(fmt);    \
-            printf("\n");   \
-            fflush(stdout); \
-        }                   \
+#define a_trace(fmt...)   \
+    do {                  \
+        if (a_option) {   \
+            printf(fmt);  \
+            printf("\n"); \
+        }                 \
     } while (0)
 
 // basic classes
 typedef struct {
-    uint16_t pid;
+    int pid;
     uint16_t virtual_page_number;
     uint32_t age;
 } frame_t;
@@ -158,7 +150,7 @@ class FIFO : public Pager {
    public:
     uint16_t select_victim_frame() override {
         uint16_t frame = hand;
-        a_trace("ASELECT %d", frame % n_frames);
+        // a_trace("ASELECT %d", frame % n_frames);
         hand = (hand + 1) % n_frames;
         return frame;
     }
@@ -186,7 +178,7 @@ class Clock : public Pager {
                 pte->referenced = false;
                 i++;
             } else {
-                a_trace("ASELECT %d %d", hand, i - hand + 1);
+                // a_trace("ASELECT %d %d", hand, i - hand + 1);
                 hand = (i + 1) % n_frames;
                 return i % n_frames;
             }
@@ -232,8 +224,8 @@ class NRU : public Pager {
         for (int j = 0; j < 4; j++) {
             if (classes[j] > -1) {
                 uint16_t selected_frame = classes[j];
-                a_trace("ASELECT: hand=%2d %d | %d %2d %2d", hand, reset, j,
-                        selected_frame, i - hand + 1);
+                // a_trace("ASELECT: hand=%2d %d | %d %2d %2d", hand, reset, j,
+                // selected_frame, i - hand + 1);
                 hand = (selected_frame + 1) % n_frames;
                 return selected_frame;
             }
@@ -248,8 +240,8 @@ class Aging : public Pager {
         uint16_t i = hand;
         uint32_t min_age = 0xffffffff;
         int min_age_frame = -1;
-        std::string frame_str = "";
-        char buffer[100];
+        // std::string frame_str = "";
+        // char buffer[100];
         while (true) {
             frame_t *frame = &frame_table[i % n_frames];
             pte_t *pte = &processes[frame->pid]
@@ -261,8 +253,8 @@ class Aging : public Pager {
                 pte->referenced = false;
             }
 
-            sprintf(buffer, "%d:%x ", i % n_frames, frame->age);
-            frame_str += std::string(buffer);
+            // sprintf(buffer, "%d:%x ", i % n_frames, frame->age);
+            // frame_str += std::string(buffer);
 
             // update the min age and min age frame
             if (min_age_frame == -1 || frame->age < min_age) {
@@ -277,8 +269,8 @@ class Aging : public Pager {
             i++;
         }
         assert(min_age_frame > -1);
-        a_trace("ASELECT %d-%d | %s| %d", hand, i % n_frames, frame_str.c_str(),
-                min_age_frame);
+        // a_trace("ASELECT %d-%d | %s| %d", hand, i % n_frames,
+        // frame_str.c_str(), min_age_frame);
         hand = (min_age_frame + 1) % n_frames;
         return min_age_frame;
     }
@@ -292,23 +284,24 @@ class WorkingSet : public Pager {
         uint16_t i = hand;
         uint32_t min_age = instruction_idx;
         uint16_t min_age_frame = hand;
-        std::string frame_str = "";
-        char buffer[100];
+        // std::string frame_str = "";
+        // char buffer[100];
         while (true) {
             frame_t *frame = &frame_table[i % n_frames];
             pte_t *pte = &processes[frame->pid]
                               ->page_table.entries[frame->virtual_page_number];
-            sprintf(buffer, " %d(%d %d:%d %d)", i % n_frames, pte->referenced,
-                    frame->pid, frame->virtual_page_number, frame->age);
-            frame_str += std::string(buffer);
+            // sprintf(buffer, " %d(%d %d:%d %d)", i % n_frames,
+            // pte->referenced,
+            //         frame->pid, frame->virtual_page_number, frame->age);
+            // frame_str += std::string(buffer);
 
             if (pte->referenced) {
                 pte->referenced = false;
                 frame->age = instruction_idx;
             } else if (instruction_idx - frame->age >= tau) {
                 min_age_frame = i % n_frames;
-                sprintf(buffer, " STOP(%lu)", i - hand + 1);
-                frame_str += std::string(buffer);
+                // sprintf(buffer, " STOP(%d)", i - hand + 1);
+                // frame_str += std::string(buffer);
                 break;
             }
 
@@ -322,9 +315,9 @@ class WorkingSet : public Pager {
             }
             i++;
         }
-        a_trace("ASELECT %d-%d |%s | %d", hand,
-                (hand + n_frames - 1) % n_frames, frame_str.c_str(),
-                min_age_frame);
+        // a_trace("ASELECT %d-%d |%s | %d", hand,
+        //         (hand + n_frames - 1) % n_frames, frame_str.c_str(),
+        //         min_age_frame);
         hand = (min_age_frame + 1) % n_frames;
         return min_age_frame;
     }
@@ -385,8 +378,8 @@ class Simulator {
     int instruction;
 
     // stats
-    uint64_t process_exits = 0;
-    uint64_t ctx_switches = 0;
+    uint32_t process_exits = 0;
+    uint32_t ctx_switches = 0;
 
    public:
     Simulator(Pager *pager) {
@@ -447,7 +440,8 @@ class Simulator {
         // check if the page is valid vma
         bool is_valid_vma = false;
         for (const auto &vma : current_process->virtual_memory_areas) {
-            if (virtual_page_number >= vma.start && virtual_page_number <= vma.end) {
+            if (virtual_page_number >= vma.start &&
+                virtual_page_number <= vma.end) {
                 is_valid_vma = true;
                 pte->is_valid_vma = is_valid_vma;
                 pte->file_mapped = vma.file_mapped;
@@ -504,7 +498,7 @@ class Simulator {
                 ctx_switches++;
                 continue;
             } else if (operation == 'e') {
-                printf("EXIT current process %d\n", value);
+                O_trace("EXIT current process %d", value);
                 process_exits++;
                 Process *process = processes[current_pid];
                 for (int i = 0; i < MAX_VPAGES; i++) {
@@ -576,7 +570,7 @@ class Simulator {
             }
             cost += ctx_switches * 130 + process_exits * 1230 + n_instructions -
                     process_exits - ctx_switches;
-            printf("TOTALCOST %lu %llu %llu %llu %lu\n", n_instructions,
+            printf("TOTALCOST %lu %lu %lu %llu %lu\n", n_instructions,
                    ctx_switches, process_exits, cost, sizeof(pte_t));
         }
     }
@@ -593,6 +587,7 @@ void read_random_file(const std::string &randomfile) {
         random_numbers.push_back(number);
     }
 }
+
 void read_input_file(const std::string &filename) {
     std::ifstream file(filename);
     std::string line;
@@ -605,23 +600,24 @@ void read_input_file(const std::string &filename) {
 
     // first line that is not a comment is the number of
     // processes
-    int n_processes = stoi(line);
+    int n_processes = std::atoi(&line[0]);
 
+    uint16_t start, end;
+    bool w_protected, f_mapped;
     for (int i = 0; i < n_processes; i++) {
         // skip comments
         while (getline(file, line)) {
             if (line.at(0) == '#') continue;
             break;
         }
-        uint16_t n_vmas = stoi(line);  // number of virtual memory areas
+        uint16_t n_vmas =
+            std::atoi(&line[0]);  // number of virtual memory areas
         std::vector<VirtualMemoryArea> vmas;
         for (int j = 0; j < n_vmas; j++) {
             while (getline(file, line)) {
                 if (line.at(0) == '#') continue;  // Ignoring all the comments
                 std::stringstream vma;
                 vma << line;
-                uint16_t start, end;
-                bool w_protected, f_mapped;
                 vma >> start >> end >> w_protected >> f_mapped;
                 vmas.push_back(
                     VirtualMemoryArea{start, end, w_protected, f_mapped});
@@ -655,7 +651,7 @@ int main(int argc, char *argv[]) {
     while ((c = getopt(argc, argv, "f:a:o:")) != -1) {
         switch (c) {
             case 'f':
-                n_frames = std::stoi(optarg);
+                n_frames = std::atoi(optarg);
                 if (MAX_FRAMES < n_frames) {
                     exit(0);
                 }
