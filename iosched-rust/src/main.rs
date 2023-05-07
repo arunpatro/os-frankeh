@@ -157,6 +157,70 @@ impl IOScheduler for SSTF {
     }
 }
 
+struct LOOK {
+    queue: VecDeque<usize>,
+    io_operations: Rc<RefCell<Vec<io_operation>>>,
+    dir: i8,
+}
+
+impl LOOK {
+    fn new(io_operations: Rc<RefCell<Vec<io_operation>>>) -> Self {
+        LOOK {
+            queue: VecDeque::new(),
+            io_operations: io_operations,
+            dir: 1,
+        }
+    }
+}
+
+impl IOScheduler for LOOK {
+    fn add(&mut self, io: usize) {
+        self.queue.push_back(io);
+    }
+
+    fn next(&mut self, track_head: usize) -> Option<usize> {
+        if self.queue.len() == 0 {
+            return None;
+        }
+
+        let mut queue_string = String::new();
+        let mut min_distance = usize::MAX;
+        let mut min_distance_index: isize = -1;
+        for (i, io) in self.queue.iter().enumerate() {
+            if self.dir == 1 && self.io_operations.borrow()[*io].track < track_head {
+                continue;
+            } else if self.dir == -1 && self.io_operations.borrow()[*io].track > track_head {
+                continue;
+            }
+            let distance =
+                (track_head as i64 - self.io_operations.borrow()[*io].track as i64).abs() as usize;
+            if distance < min_distance {
+                min_distance = distance;
+                min_distance_index = i as isize;
+            }
+            queue_string.push_str(&format!("{}:{} ", *io, distance));
+        }
+
+        // after iterating through the queue, if we didn't find a request in the current direction
+        // then we need to change directions
+        if min_distance_index == -1 {
+            self.dir = -self.dir;
+            q_trace!("\tGet: () --> change direction to {}", self.dir);
+            return self.next(track_head);
+        }
+
+        let min_distance_index = min_distance_index as usize;
+        q_trace!(
+            "\tGet: ({}) --> {} dir={}",
+            queue_string,
+            self.queue[min_distance_index],
+            self.dir
+        );
+
+        self.queue.remove(min_distance_index)
+    }
+}
+
 fn actual_main_fn(algorithm: &str, inputfile: &str) {
     // Read input file
     let io_requests = read_input_file(inputfile);
@@ -172,10 +236,10 @@ fn actual_main_fn(algorithm: &str, inputfile: &str) {
             // SSTF
             Box::new(SSTF::new(io_requests.clone()))
         }
-        // "s" => {
-        //     // SCAN
-        //     Box::new(SCAN::new())
-        // }
+        "L" => {
+            // LOOK
+            Box::new(LOOK::new(io_requests.clone()))
+        }
         // "c" => {
         //     // CSCAN
         //     Box::new(CSCAN::new())
@@ -204,6 +268,9 @@ fn actual_main_fn(algorithm: &str, inputfile: &str) {
     };
     v_trace!("TRACE");
     'simul: loop {
+        if time == 451 {
+            print!("");
+        }
         // println!("time: {}", time);
         // if a new I/O arrived at the system at this current time
         //      → add request to IO-queue
@@ -356,10 +423,10 @@ fn parse_args(actual_args: &Vec<String>) -> (String, String) {
 fn get_default_args() -> Vec<String> {
     vec![
         "iosched".to_string(),
-        "-sS".to_string(),
+        "-sL".to_string(),
         "-v".to_string(),
         "-q".to_string(),
-        "../lab4_assign/input9".to_string(),
+        "../lab4_assign/input1".to_string(),
     ]
 }
 
