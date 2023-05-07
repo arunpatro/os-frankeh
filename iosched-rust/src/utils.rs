@@ -1,5 +1,6 @@
 use crate::io_operation;
-use std::collections::VecDeque;
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 
@@ -8,7 +9,7 @@ use std::io::{BufRead, BufReader};
 // is issued and the 2nd integer is the track that is accesses. Since IO operation latencies are largely
 // dictated by seek delay (i.e. moving the head to the correct track), we ignore rotational and transfer
 // delays for simplicity. The inputs are well formed.
-pub fn read_input_file(filename: &str) -> Vec<io_operation> {
+pub fn read_input_file(filename: &str) -> Rc<RefCell<Vec<io_operation>>> {
     let file = File::open(filename).expect("Failed to open file");
     let mut reader = BufReader::new(file);
     let mut line = String::new();
@@ -42,5 +43,5 @@ pub fn read_input_file(filename: &str) -> Vec<io_operation> {
         line.clear();
     }
 
-    io_operations
+    Rc::new(RefCell::new(io_operations))
 }
