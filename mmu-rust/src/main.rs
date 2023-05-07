@@ -432,7 +432,7 @@ impl Pager for Aging {
         let mut lowest_age = None;
         let mut lowest_age_frame = 0;
 
-        let mut frame_string = String::new(); // Initialize with empty string
+        // let mut frame_string = String::new(); // Initialize with empty string
 
         loop {
             let (pid, vpage, age);
@@ -450,7 +450,7 @@ impl Pager for Aging {
                 age = frame.age;
 
                 // add the age to the frame string by appending
-                frame_string.push_str(&format!("{}:{:x} ", frame_idx % self.num_frames, frame.age));
+                // frame_string.push_str(&format!("{}:{:x} ", frame_idx % self.num_frames, frame.age));
             }
 
             if let Some(current_lowest_age) = lowest_age {
@@ -472,13 +472,13 @@ impl Pager for Aging {
             frame_idx += 1;
         }
 
-        a_trace!(
-            "ASELECT {}-{} | {}| {}",
-            old_hand,
-            frame_idx % self.num_frames,
-            frame_string,
-            lowest_age_frame
-        );
+        // a_trace!(
+        //     "ASELECT {}-{} | {}| {}",
+        //     old_hand,
+        //     frame_idx % self.num_frames,
+        //     frame_string,
+        //     lowest_age_frame
+        // );
 
         self.hand = (lowest_age_frame + 1) % self.num_frames;
         lowest_age_frame
