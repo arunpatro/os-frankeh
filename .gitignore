@@ -1,10 +1,12 @@
 lab1_assign/
 lab2_assign/
 lab3_assign/
+lab4_assign/
 
 *.dSYM
 .DS_Store
 .vscode
+.vscode_rs
 outputs/
 
 run.sh
@@ -15,3 +17,6 @@ target/
 
 arun_out
 arun_outz
+test_inputs
+test_outputs
+pred_outputs
