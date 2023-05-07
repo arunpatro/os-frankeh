@@ -221,6 +221,73 @@ impl IOScheduler for LOOK {
     }
 }
 
+struct CLOOK {
+    queue: VecDeque<usize>,
+    io_operations: Rc<RefCell<Vec<io_operation>>>,
+}
+
+impl CLOOK {
+    fn new(io_operations: Rc<RefCell<Vec<io_operation>>>) -> Self {
+        CLOOK {
+            queue: VecDeque::new(),
+            io_operations: io_operations,
+        }
+    }
+}
+
+impl IOScheduler for CLOOK {
+    fn add(&mut self, io: usize) {
+        self.queue.push_back(io);
+    }
+
+    fn next(&mut self, track_head: usize) -> Option<usize> {
+        if self.queue.len() == 0 {
+            return None;
+        }
+
+        let mut queue_string = String::new();
+        let mut distances = Vec::new();
+        for (i, io) in self.queue.iter().enumerate() {
+            let distance = (self.io_operations.borrow()[*io].track as i64 - track_head as i64);
+            distances.push(distance);
+            queue_string.push_str(&format!("{}:{} ", *io, distance));
+        }
+
+        // after iterating through the queue,
+        // first check for smallest non-negative distance
+        // if nothing smallest exists, return smallest distance
+        let smallest_positive_index = distances
+            .iter()
+            .enumerate()
+            .filter(|&(_, &x)| x >= 0)
+            .min_by_key(|&(_, &x)| x)
+            .map(|(index, _)| index);
+
+        if smallest_positive_index.is_some() {
+            let smallest_positive_index = smallest_positive_index.unwrap();
+            q_trace!(
+                "\tGet: ({}) --> {}",
+                queue_string,
+                self.queue[smallest_positive_index]
+            );
+            return self.queue.remove(smallest_positive_index);
+        } else {
+            let smallest_index = distances
+                .iter()
+                .enumerate()
+                .min_by_key(|&(_, &x)| x)
+                .map(|(index, _)| index)
+                .unwrap();
+            q_trace!(
+                "\tGet: ({}) --> go to bottom and pick {}",
+                queue_string,
+                self.queue[smallest_index]
+            );
+            return self.queue.remove(smallest_index);
+        }
+    }
+}
+
 fn actual_main_fn(algorithm: &str, inputfile: &str) {
     // Read input file
     let io_requests = read_input_file(inputfile);
@@ -240,10 +307,10 @@ fn actual_main_fn(algorithm: &str, inputfile: &str) {
             // LOOK
             Box::new(LOOK::new(io_requests.clone()))
         }
-        // "c" => {
-        //     // CSCAN
-        //     Box::new(CSCAN::new())
-        // }
+        "C" => {
+            // LOOK
+            Box::new(CLOOK::new(io_requests.clone()))
+        }
         // "f" => {
         //     // FSCAN
         //     Box::new(FSCAN::new())
@@ -423,10 +490,10 @@ fn parse_args(actual_args: &Vec<String>) -> (String, String) {
 fn get_default_args() -> Vec<String> {
     vec![
         "iosched".to_string(),
-        "-sL".to_string(),
+        "-sC".to_string(),
         "-v".to_string(),
         "-q".to_string(),
-        "../lab4_assign/input1".to_string(),
+        "../lab4_assign/input7".to_string(),
     ]
 }
 
