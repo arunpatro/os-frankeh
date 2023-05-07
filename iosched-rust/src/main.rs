@@ -146,7 +146,11 @@ impl IOScheduler for SSTF {
             queue_string.push_str(&format!("{}:{} ", *io, distance));
         }
         if self.queue.len() > 0 {
-            q_trace!("\tGet: ({}) --> {}", queue_string, self.queue[min_distance_index]);
+            q_trace!(
+                "\tGet: ({}) --> {}",
+                queue_string,
+                self.queue[min_distance_index]
+            );
         }
 
         self.queue.remove(min_distance_index)
@@ -199,7 +203,7 @@ fn actual_main_fn(algorithm: &str, inputfile: &str) {
         max_wait_time: 0,
     };
     v_trace!("TRACE");
-    loop {
+    'simul: loop {
         // println!("time: {}", time);
         // if a new I/O arrived at the system at this current time
         //      → add request to IO-queue
@@ -230,13 +234,26 @@ fn actual_main_fn(algorithm: &str, inputfile: &str) {
         // → Fetch the next request from IO-queue and start the new IO.
         // Else if all IO from input file processed
         // → exit simulation
-        if active_io.is_none() {
+        while active_io.is_none() {
+            // If requests are pending
+            // → Fetch the next request from IO-queue and start the new IO.
             if let Some(io_id) = scheduler.next(track_head) {
                 let io = &mut io_requests.borrow_mut()[io_id];
                 io.start_time = Some(time);
                 active_io = Some(io_id);
                 v_trace!("{}:{:6} issue {} {}", time, io_id, io.track, track_head);
+
+                // Check if the new IO request has completed at the same time it was issued
+                if track_head == io.track {
+                    io.completed_time = Some(time);
+                    v_trace!("{}:{:6} finish {}", time, io_id, time - io.time);
+                    active_io = None;
+                }
             } else if io_ptr >= io_requests.borrow().len() {
+                // No more possible I/O requests, exit the simul loop
+                break 'simul;
+            } else {
+                // No more pending I/O requests, exit the loop
                 break;
             }
         }
@@ -256,25 +273,30 @@ fn actual_main_fn(algorithm: &str, inputfile: &str) {
     }
 
     // Compute stats
+    let io_requests_borrow = io_requests.borrow();
+    let num_requests = io_requests_borrow.len() as f64;
+
     stats.total_time = time;
-    stats.total_movement = io_requests.borrow().iter().fold(0, |acc, io| {
-        acc + (io.completed_time.unwrap() - io.start_time.unwrap())
-    });
+    stats.total_movement = io_requests_borrow
+        .iter()
+        .map(|io| io.completed_time.unwrap() - io.start_time.unwrap())
+        .sum();
     stats.io_utilization = (stats.total_movement as f64) / (time as f64);
-    stats.avg_turnaround_time = io_requests.borrow().iter().fold(0.0, |acc, io| {
-        acc + (io.completed_time.unwrap() - io.time) as f64
-    }) / (io_requests.borrow().len() as f64);
-    stats.avg_wait_time = io_requests.borrow().iter().fold(0.0, |acc, io| {
-        acc + (io.start_time.unwrap() - io.time) as f64
-    }) / (io_requests.borrow().len() as f64);
-    stats.max_wait_time = io_requests.borrow().iter().fold(0, |acc, io| {
-        let wait_time = io.start_time.unwrap() - io.time;
-        if wait_time > acc {
-            wait_time
-        } else {
-            acc
-        }
-    });
+    stats.avg_turnaround_time = io_requests_borrow
+        .iter()
+        .map(|io| (io.completed_time.unwrap() - io.time) as f64)
+        .sum::<f64>()
+        / num_requests;
+    stats.avg_wait_time = io_requests_borrow
+        .iter()
+        .map(|io| (io.start_time.unwrap() - io.time) as f64)
+        .sum::<f64>()
+        / num_requests;
+    stats.max_wait_time = io_requests_borrow
+        .iter()
+        .map(|io| io.start_time.unwrap() - io.time)
+        .max()
+        .unwrap_or(0);
 
     // Print end stats
     print_summary(io_requests.clone(), &stats);
