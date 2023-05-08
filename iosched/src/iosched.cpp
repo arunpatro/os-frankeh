@@ -6,6 +6,8 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include <limits>
+#include <algorithm>
 
 struct io_operation {
     int arr_time;
@@ -38,10 +40,6 @@ Scheduler *sched;
 
 void read_input_file(const std::string &filename) {
     std::ifstream file(filename);
-    if (!file.is_open()) {
-        throw std::runtime_error("Failed to open file");
-    }
-
     std::string line;
     while (std::getline(file, line)) {
         if (line.empty() || line[0] == '#') {
@@ -50,10 +48,7 @@ void read_input_file(const std::string &filename) {
 
         std::istringstream iss(line);
         int arr_time, track;
-        if (!(iss >> arr_time >> track)) {
-            throw std::runtime_error("Failed to parse time and track");
-        }
-
+        iss >> arr_time >> track;
         io_operations.push_back(io_operation(arr_time, track));
     }
 }
@@ -136,25 +131,148 @@ class SSTF : public Scheduler {
     bool is_empty() override { return io_queue.empty(); }
 };
 
+class LOOK : public Scheduler {
+   public:
+    int direction = 1;
+    LOOK() {}
+    ~LOOK() {}
+    void add(int io_index) override { io_queue.push_back(io_index); }
+    int next() override {
+        if (!io_queue.empty()) {
+            int min_distance = std::numeric_limits<int>::max();
+            int min_distance_index = -1;
+            for (int i = 0; i < io_queue.size(); ++i) {
+                auto it = std::next(io_queue.begin(), i);
+                int io = *it;
+                if (direction == 1 && io_operations[io].track < track_head) {
+                    continue;
+                } else if (direction == -1 &&
+                           io_operations[io].track > track_head) {
+                    continue;
+                }
+                int distance = std::abs(io_operations[io].track - track_head);
+                if (distance < min_distance) {
+                    min_distance = distance;
+                    min_distance_index = i;
+                }
+            }
+            if (min_distance_index == -1) {
+                direction = -direction;
+                return next();
+            }
+            auto it = std::next(io_queue.begin(), min_distance_index);
+            int io = *it;
+            io_queue.erase(it);
+            return io;
+        } else {
+            return -1;
+        }
+    }
+    bool is_empty() override { return io_queue.empty(); }
+
+   private:
+    std::list<int> io_queue;
+};
+
+class CLOOK : public Scheduler {
+   public:
+    CLOOK() {}
+    ~CLOOK() {}
+    void add(int io_index) override { io_queue.push_back(io_index); }
+    int next() override {
+        if (!io_queue.empty()) {
+            std::vector<int> distances;
+            for (const auto &io : io_queue) {
+                int distance = io_operations[io].track - track_head;
+                distances.push_back(distance);
+            }
+
+            auto smallest_positive_index =
+                std::min_element(distances.begin(), distances.end(),
+                                 [](const int &a, const int &b) {
+                                     return a >= 0 && (b < 0 || a < b);
+                                 });
+            if (*smallest_positive_index >= 0) {
+                auto it = io_queue.begin();
+                std::advance(it, smallest_positive_index - distances.begin());
+                int io = *it;
+                io_queue.erase(it);
+                return io;
+            } else {
+                auto smallest_index =
+                    std::min_element(distances.begin(), distances.end());
+                auto it = io_queue.begin();
+                std::advance(it, smallest_index - distances.begin());
+                int io = *it;
+                io_queue.erase(it);
+                return io;
+            }
+        } else {
+            return -1;
+        }
+    }
+    bool is_empty() override { return io_queue.empty(); }
+
+   private:
+    std::list<int> io_queue;
+};
+
+class FLOOK : public Scheduler {
+   public:
+    int direction = 1;
+    std::list<int> add_queue;
+
+    FLOOK() {}
+    ~FLOOK() {}
+    void add(int io_index) override { add_queue.push_back(io_index); }
+    int next() override {
+        if (io_queue.empty()) {
+            io_queue.swap(add_queue);
+        }
+
+        if (!io_queue.empty()) {
+            int min_distance = std::numeric_limits<int>::max();
+            int min_distance_index = -1;
+            for (int i = 0; i < io_queue.size(); ++i) {
+                auto it = std::next(io_queue.begin(), i);
+                int io = *it;
+                if (direction == 1 && io_operations[io].track < track_head) {
+                    continue;
+                } else if (direction == -1 &&
+                           io_operations[io].track > track_head) {
+                    continue;
+                }
+                int distance = std::abs(io_operations[io].track - track_head);
+                if (distance < min_distance) {
+                    min_distance = distance;
+                    min_distance_index = i;
+                }
+            }
+            if (min_distance_index == -1) {
+                direction = -direction;
+                return next();
+            }
+            auto it = std::next(io_queue.begin(), min_distance_index);
+            int io = *it;
+            io_queue.erase(it);
+            return io;
+        } else {
+            return -1;
+        }
+    }
+    bool is_empty() override { return io_queue.empty(); }
+
+   private:
+    std::list<int> io_queue;
+};
+
 void simulation() {
     int io_ptr = 0;  // index to the next IO request to be processed
     while (true) {
-        // if (simul_time == 500) {
-        // break;
-        // }
-
-        // check when to stop
-        // if (io_ptr >= io_operations.size() && active_io < 0 &&
-        //     sched->is_empty()) {
-        //     break;
-        // }
-
         // add new io to the scheduler
         if (io_ptr < io_operations.size()) {
             if (io_operations[io_ptr].arr_time == simul_time) {
                 sched->add(io_ptr);
-                // printf("%5d: %5d add %d\n", simul_time, io_ptr,
-                //    io_operations[io_ptr].track);
                 io_ptr++;
             }
         }
@@ -163,8 +281,6 @@ void simulation() {
         if (active_io >= 0) {
             if (io_operations[active_io].track == track_head) {
                 io_operations[active_io].completed_time = simul_time;
-                // printf("%5d: %5d finish %d\n", simul_time, active_io,
-                //    simul_time - io_operations[active_io].arr_time);
                 active_io = -1;
             }
         }
@@ -176,13 +292,9 @@ void simulation() {
             if (next_io >= 0) {
                 io_operations[next_io].start_time = simul_time;
                 active_io = next_io;
-                // printf("%5d: %5d issue %d %d\n", simul_time, active_io,
-                //    io_operations[next_io].track, track_head);
 
                 if (io_operations[next_io].track == track_head) {
                     io_operations[next_io].completed_time = simul_time;
-                    // printf("%5d: %5d finish %d\n", simul_time, active_io,
-                    //    simul_time - io_operations[active_io].arr_time);
                     active_io = -1;
                 }
             } else if (io_ptr >= io_operations.size()) {
@@ -220,15 +332,15 @@ int main(int argc, char *argv[]) {
                     case 'S':
                         sched = new SSTF();
                         break;
-                    // case 'L':
-                    //     sched = new LOOK();
-                    //     break;
-                    // case 'C':
-                    //     sched = new CLOOK();
-                    //     break;
-                    // case 'F':
-                    //     sched = new FLOOK();
-                    //     break;
+                    case 'L':
+                        sched = new LOOK();
+                        break;
+                    case 'C':
+                        sched = new CLOOK();
+                        break;
+                    case 'F':
+                        sched = new FLOOK();
+                        break;
                     default:
                         std::cerr << "Invalid scheduler algorithm specified."
                                   << std::endl;
