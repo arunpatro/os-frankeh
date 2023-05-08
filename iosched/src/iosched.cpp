@@ -13,7 +13,10 @@ struct io_operation {
     int start_time;
     int completed_time;
     io_operation(int arr_time, int track)
-        : arr_time(arr_time), track(track), start_time(-1), completed_time(-1) {}
+        : arr_time(arr_time),
+          track(track),
+          start_time(-1),
+          completed_time(-1) {}
 };
 
 class Scheduler {
@@ -25,7 +28,6 @@ class Scheduler {
     virtual int next() = 0;
     virtual bool is_empty() = 0;
 };
-
 
 // globals
 std::vector<io_operation> io_operations;
@@ -105,25 +107,38 @@ class FIFO : public Scheduler {
             return -1;
         }
     }
-    bool is_empty() override { return true; }
+    bool is_empty() override { return io_queue.empty(); }
 };
 
 void simulation() {
     int io_ptr = 0;  // index to the next IO request to be processed
     while (true) {
-        printf("TRACE: %d\n", simul_time);
+        // if (simul_time == 500) {
+        // break;
+        // }
+
+        // check when to stop
+        // if (io_ptr >= io_operations.size() && active_io < 0 &&
+        //     sched->is_empty()) {
+        //     break;
+        // }
+
         // add new io to the scheduler
         if (io_ptr < io_operations.size()) {
             if (io_operations[io_ptr].arr_time == simul_time) {
                 sched->add(io_ptr);
+                // printf("%5d: %5d add %d\n", simul_time, io_ptr,
+                    //    io_operations[io_ptr].track);
                 io_ptr++;
             }
         }
 
         // check active io for completion
-        if (active_io > 0) {
+        if (active_io >= 0) {
             if (io_operations[active_io].track == track_head) {
                 io_operations[active_io].completed_time = simul_time;
+                // printf("%5d: %5d finish %d\n", simul_time, active_io,
+                    //    simul_time - io_operations[active_io].arr_time);
                 active_io = -1;
             }
         }
@@ -132,18 +147,22 @@ void simulation() {
         while (active_io < 0) {
             // get the next IO request from the scheduler
             int next_io = sched->next();
-            if (next_io < 0) {
-                break;
+            if (next_io >= 0) {
+                io_operations[next_io].start_time = simul_time;
+                active_io = next_io;
+                // printf("%5d: %5d issue %d %d\n", simul_time, active_io,
+                    //    io_operations[next_io].track, track_head);
+
+                if (io_operations[next_io].track == track_head) {
+                    io_operations[next_io].completed_time = simul_time;
+                    // printf("%5d: %5d finish %d\n", simul_time, active_io,
+                        //    simul_time - io_operations[active_io].arr_time);
+                    active_io = -1;
+                }
             } else if (io_ptr >= io_operations.size()) {
                 return;
-            }
-
-            io_operations[next_io].start_time = simul_time;
-            active_io = next_io;
-
-            if (io_operations[next_io].track == track_head) {
-                io_operations[next_io].completed_time = simul_time;
-                active_io = -1;
+            } else {
+                break;
             }
         }
 
@@ -211,5 +230,5 @@ int main(int argc, char *argv[]) {
 
     read_input_file(inputfile);
     simulation();
-    // print_summary();
+    print_summary();
 }
