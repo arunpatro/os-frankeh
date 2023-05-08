@@ -365,23 +365,18 @@ fn actual_main_fn(algorithm: &str, inputfile: &str) {
     // Create a new IO scheduler
     let mut scheduler: Box<dyn IOScheduler> = match algorithm {
         "N" => {
-            // FIFO
             Box::new(FIFO::new())
         }
         "S" => {
-            // SSTF
             Box::new(SSTF::new(io_requests.clone()))
         }
         "L" => {
-            // LOOK
             Box::new(LOOK::new(io_requests.clone()))
         }
         "C" => {
-            // LOOK
             Box::new(CLOOK::new(io_requests.clone()))
         }
         "F" => {
-            // LOOK
             Box::new(FLOOK::new(io_requests.clone()))
         }
         _ => {
@@ -404,12 +399,7 @@ fn actual_main_fn(algorithm: &str, inputfile: &str) {
     };
     v_trace!("TRACE");
     'simul: loop {
-        if time == 451 {
-            print!("");
-        }
-        // println!("time: {}", time);
-        // if a new I/O arrived at the system at this current time
-        //      → add request to IO-queue
+        // new io arrived
         if io_ptr < io_requests.borrow().len() && io_requests.borrow()[io_ptr].time == time {
             scheduler.add(io_ptr);
             v_trace!(
@@ -421,8 +411,7 @@ fn actual_main_fn(algorithm: &str, inputfile: &str) {
             io_ptr += 1;
         }
 
-        // If an IO is active and completed at this time
-        // → Compute relevant info and store in IO request for final summary
+        // check active io for completion
         if let Some(io_id) = active_io {
             let io = &mut io_requests.borrow_mut()[io_id];
             if track_head == io.track {
@@ -432,11 +421,7 @@ fn actual_main_fn(algorithm: &str, inputfile: &str) {
             }
         }
 
-        // If no IO request is active now
-        // If requests are pending
-        // → Fetch the next request from IO-queue and start the new IO.
-        // Else if all IO from input file processed
-        // → exit simulation
+        // if no active io, get next io from scheduler
         while active_io.is_none() {
             // If requests are pending
             // → Fetch the next request from IO-queue and start the new IO.
@@ -461,8 +446,7 @@ fn actual_main_fn(algorithm: &str, inputfile: &str) {
             }
         }
 
-        // If an IO is active
-        // → Move the head by one unit in the direction it's going (to simulate seek)
+        // Move the head
         if let Some(io_id) = active_io {
             let io = &io_requests.borrow()[io_id];
             if track_head < io.track {
