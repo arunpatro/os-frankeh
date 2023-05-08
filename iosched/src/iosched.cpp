@@ -2,7 +2,7 @@
 
 #include <fstream>
 #include <iostream>
-#include <queue>
+#include <list>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -21,7 +21,7 @@ struct io_operation {
 
 class Scheduler {
    public:
-    std::queue<int> io_queue;
+    std::list<int> io_queue;
     Scheduler() {}
     virtual ~Scheduler() {}
     virtual void add(int io_index) = 0;
@@ -92,17 +92,43 @@ void print_summary() {
            io_utilization, avg_turnaround_time, avg_wait_time, max_wait_time);
 }
 
-
 class FIFO : public Scheduler {
    public:
     FIFO() {}
     ~FIFO() {}
-    void add(int io_index) override { io_queue.push(io_index); }
+    void add(int io_index) override { io_queue.push_back(io_index); }
     int next() override {
         if (!io_queue.empty()) {
             int next_io = io_queue.front();
-            io_queue.pop();
+            io_queue.pop_front();
             return next_io;
+        } else {
+            return -1;
+        }
+    }
+    bool is_empty() override { return io_queue.empty(); }
+};
+
+class SSTF : public Scheduler {
+   public:
+    SSTF() {}
+    ~SSTF() {}
+    void add(int io_index) override { io_queue.push_back(io_index); }
+    int next() override {
+        if (!io_queue.empty()) {
+            int min_distance = 1000000;
+            int min_io = -1;
+            auto min_it = io_queue.begin();
+            for (auto it = io_queue.begin(); it != io_queue.end(); ++it) {
+                int distance = abs(io_operations[*it].track - track_head);
+                if (distance < min_distance) {
+                    min_distance = distance;
+                    min_io = *it;
+                    min_it = it;
+                }
+            }
+            io_queue.erase(min_it);
+            return min_io;
         } else {
             return -1;
         }
@@ -128,7 +154,7 @@ void simulation() {
             if (io_operations[io_ptr].arr_time == simul_time) {
                 sched->add(io_ptr);
                 // printf("%5d: %5d add %d\n", simul_time, io_ptr,
-                    //    io_operations[io_ptr].track);
+                //    io_operations[io_ptr].track);
                 io_ptr++;
             }
         }
@@ -138,7 +164,7 @@ void simulation() {
             if (io_operations[active_io].track == track_head) {
                 io_operations[active_io].completed_time = simul_time;
                 // printf("%5d: %5d finish %d\n", simul_time, active_io,
-                    //    simul_time - io_operations[active_io].arr_time);
+                //    simul_time - io_operations[active_io].arr_time);
                 active_io = -1;
             }
         }
@@ -151,12 +177,12 @@ void simulation() {
                 io_operations[next_io].start_time = simul_time;
                 active_io = next_io;
                 // printf("%5d: %5d issue %d %d\n", simul_time, active_io,
-                    //    io_operations[next_io].track, track_head);
+                //    io_operations[next_io].track, track_head);
 
                 if (io_operations[next_io].track == track_head) {
                     io_operations[next_io].completed_time = simul_time;
                     // printf("%5d: %5d finish %d\n", simul_time, active_io,
-                        //    simul_time - io_operations[active_io].arr_time);
+                    //    simul_time - io_operations[active_io].arr_time);
                     active_io = -1;
                 }
             } else if (io_ptr >= io_operations.size()) {
@@ -191,9 +217,9 @@ int main(int argc, char *argv[]) {
                     case 'N':
                         sched = new FIFO();
                         break;
-                    // case 'S':
-                    //     sched = new SSTF();
-                    //     break;
+                    case 'S':
+                        sched = new SSTF();
+                        break;
                     // case 'L':
                     //     sched = new LOOK();
                     //     break;
